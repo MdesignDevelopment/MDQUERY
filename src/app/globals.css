@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* VS Code Dark+-family palette — dark-first (§3), light mode available */
+:root {
+  --bg: #1e1e1e;
+  --panel: #252526;
+  --panel-2: #2d2d30;
+  --edge: #3c3c3c;
+  --ink: #d4d4d4;
+  --ink-dim: #9d9d9d;
+  --ink-faint: #6a6a6a;
+  --accent: #0e639c;
+  --accent-hi: #1177bb;
+  --risk-safe: #4ec9b0;
+  --risk-warn: #d7ba7d;
+  --risk-high: #f14c4c;
+  color-scheme: dark;
+}
+
+html[data-theme='light'] {
+  --bg: #ffffff;
+  --panel: #f3f3f3;
+  --panel-2: #ececec;
+  --edge: #d4d4d4;
+  --ink: #1f1f1f;
+  --ink-dim: #555555;
+  --ink-faint: #8a8a8a;
+  --accent: #005fb8;
+  --accent-hi: #0070d8;
+  --risk-safe: #0e8a6d;
+  --risk-warn: #a06a00;
+  --risk-high: #cd3131;
+  color-scheme: light;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--edge) transparent;
+}
+
+.mono {
+  font-family: ui-monospace, 'Cascadia Code', Consolas, Menlo, monospace;
+}
+
+/* @layer components so single-purpose utilities (w-auto, max-w-*, py-*) can override these */
+@layer components {
+  .btn {
+    @apply inline-flex items-center gap-1.5 rounded-sm border border-edge bg-panel-2 px-2.5 py-1 text-xs text-ink hover:bg-panel disabled:opacity-40 disabled:pointer-events-none transition-colors;
+  }
+  .btn-primary {
+    @apply border-transparent text-white;
+    background: var(--accent);
+  }
+  .btn-primary:hover {
+    background: var(--accent-hi);
+  }
+  .btn-danger {
+    @apply border-transparent text-white;
+    background: var(--risk-high);
+  }
+
+  .input {
+    @apply w-full rounded-sm border border-edge bg-bg px-2 py-1 text-xs text-ink outline-none focus:border-[var(--accent)];
+  }
+
+  .badge {
+    @apply mono inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] uppercase tracking-wide;
+  }
+}
+
+.diff-add {
+  background: rgba(78, 201, 176, 0.12);
+  color: var(--risk-safe);
+}
+.diff-del {
+  background: rgba(241, 76, 76, 0.12);
+  color: var(--risk-high);
+  text-decoration: none;
+}
+

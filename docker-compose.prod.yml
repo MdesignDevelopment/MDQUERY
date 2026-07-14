@@ -1,0 +1,38 @@
+# Production deployment: optimized Next.js build (standalone output), no bind
+# mounts, no dev overhead. Secrets come from .env (same as dev).
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mdquery
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mdquery}
+      POSTGRES_DB: mdquery
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U mdquery']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  web:
+    build: .
+    environment:
+      DATABASE_URL: postgres://mdquery:${POSTGRES_PASSWORD:-mdquery}@db:5432/mdquery
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      AI_BASE_URL: ${AI_BASE_URL:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-}
+    ports:
+      - '3000:3000'
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  dbdata:
