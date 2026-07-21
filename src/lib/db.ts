@@ -8,7 +8,12 @@ const globalAny = globalThis as unknown as { __mdqPool?: Pool; __mdqReady?: Prom
 
 function pool(): Pool {
   if (!globalAny.__mdqPool) {
-    globalAny.__mdqPool = new Pool({ connectionString: process.env.DATABASE_URL, max: 10 });
+    // On serverless (Vercel) each concurrent function instance gets its own
+    // pool, so keep it small — a handful of instances × max:10 could otherwise
+    // exhaust the database's connection limit. The long-running Docker
+    // container only ever has one pool, so it can afford to be larger.
+    const max = process.env.VERCEL ? 3 : 10;
+    globalAny.__mdqPool = new Pool({ connectionString: process.env.DATABASE_URL, max });
   }
   return globalAny.__mdqPool;
 }

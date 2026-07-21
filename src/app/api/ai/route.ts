@@ -7,6 +7,10 @@ import { HttpError } from '@/lib/store';
  * browser. Only receives the open query's text + the instruction — never any
  * schema context (none exists anywhere in this platform).
  */
+// Longer completions can take a while to stream; raise the serverless timeout
+// beyond Next's default (Vercel caps this per-plan — harmless if unreachable).
+export const maxDuration = 60;
+
 export const POST = handler(async (req) => {
   const { mode, body, instruction } = await req.json();
   if (!['edit', 'explain', 'review'].includes(mode)) throw new HttpError(400, 'Bad mode');

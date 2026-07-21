@@ -23,10 +23,9 @@ export default function PublicDictionaryPage() {
         <span className="flex-1" />
         <select className="input w-auto shrink-0" value={dept} onChange={(e) => setDept(e.target.value)} aria-label="Filter by department">
           <option value="">All departments</option>
+          <option>Dev</option>
           <option>Support</option>
-          <option>GIS</option>
-          <option>DevOps</option>
-          <option>Sales Ops</option>
+          <option>Data</option>
         </select>
         <select className="input w-auto shrink-0" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort">
           <option value="recent">Recent</option>

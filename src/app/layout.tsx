@@ -4,6 +4,7 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'M.Design Query Dictionary',
   description: 'Centralized dictionary of SQL / PL/SQL queries — system of record, never an execution engine.',
+  icons: { icon: '/logo.png' },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

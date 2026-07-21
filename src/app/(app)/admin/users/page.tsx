@@ -15,7 +15,7 @@ interface AdminUser {
 }
 
 const ROLES = ['user', 'lead', 'curator', 'admin'];
-const DEPARTMENTS = ['Support', 'GIS', 'DevOps', 'Sales Ops'];
+const DEPARTMENTS = ['Dev', 'Support', 'Data'];
 
 /**
  * Admin-only user management: create accounts, change roles/departments,

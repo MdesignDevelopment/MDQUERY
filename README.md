@@ -21,6 +21,20 @@ Dev and prod share the same `.env` and database volume; run one or the other (bo
 
 Reset the database (re-runs the seed): `docker compose stop web db && docker volume rm mdquery_dbdata && docker compose up -d`.
 
+## Deploy to Vercel
+
+The app runs on Vercel with a hosted Postgres database (Neon) instead of the Docker container — no separate backend to deploy, no Dockerfile involved.
+
+1. **Database**: use a Neon (or any Postgres-compatible) database. Use the **direct (non-pooler) connection string**, e.g. `postgresql://user:pass@ep-xxx.region.aws.neon.tech/dbname?sslmode=require` — not the `-pooler` hostname. Neon's PgBouncer pooler runs in transaction-pooling mode, which doesn't reliably keep a consistent `search_path` across pooled backends; this app manages its own connection pool ([db.ts](src/lib/db.ts)) and doesn't need Neon's pooler on top. The schema, indexes, and seed data are created automatically on first request, same as local — no migration step to run by hand.
+2. **Import the project** at vercel.com/new from this repo. Vercel auto-detects Next.js; no build command changes needed (the self-hosted Monaco assets are copied into `public/monaco` automatically as part of `npm run build`, same script as local).
+3. **Environment variables** (Project Settings → Environment Variables):
+   - `DATABASE_URL` — the Neon direct connection string above
+   - `SESSION_SECRET` — a long random string (the app refuses to boot in production without one — see [auth.ts](src/lib/auth.ts))
+   - `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` — optional; omit for offline-fallback mode
+4. **Deploy.** Sessions are HTTPS-only cookies in production automatically; the connection pool sizes itself down for serverless concurrency automatically (both are environment-detected, no config needed).
+
+The Docker Compose files (`docker-compose.yml` / `docker-compose.prod.yml`) remain the self-hosted alternative — pick one path or the other, both read from the same `.env` format.
+
 ### Performance notes
 
 - Postgres carries scope/sort indexes plus pg_trgm GIN indexes for `%term%` search — list/search stay fast as dictionaries grow.

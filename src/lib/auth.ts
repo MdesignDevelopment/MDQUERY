@@ -9,6 +9,11 @@ import type { User } from './types';
  * NextAuth.js or Supabase Auth); role claims map onto users.role.
  */
 
+// In production (Vercel, or the Docker prod compose) a real secret is required —
+// the insecure dev fallback would let anyone forge a session cookie otherwise.
+if (!process.env.SESSION_SECRET && process.env.NODE_ENV === 'production') {
+  throw new Error('SESSION_SECRET must be set in production (see .env.example).');
+}
 const SECRET = process.env.SESSION_SECRET ?? 'dev-secret';
 const COOKIE = 'mdq_session';
 
