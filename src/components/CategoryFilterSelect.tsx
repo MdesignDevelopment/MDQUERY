@@ -20,8 +20,6 @@ export default function CategoryFilterSelect({ scope, value, onChange }: {
     fetch(`/api/categories?scope=${scope}`).then((r) => r.json()).then((d) => setCategories(d.categories ?? []));
   }, [scope]);
 
-  if (categories.length === 0) return null;
-
   return (
     <select className="input w-auto shrink-0" value={value} onChange={(e) => onChange(e.target.value)} aria-label="Filter by category">
       <option value="">All categories</option>
