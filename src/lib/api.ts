@@ -19,6 +19,16 @@ export function handler(fn: (req: Request, user: User, params: Record<string, st
       if (e instanceof AuthError) {
         return NextResponse.json({ error: e.message }, { status: e.status });
       }
+      // Defense-in-depth: a raw Postgres constraint error (e.g. a genuine race
+      // on a uniqueness check) should never surface as a bare "Internal error" —
+      // translate the common ones into something the user can act on.
+      const code = (e as { code?: string })?.code;
+      if (code === '23505') {
+        return NextResponse.json({ error: 'That value is already in use — someone (or another tab) saved the same thing first. Reload and try again.' }, { status: 409 });
+      }
+      if (code === '23503') {
+        return NextResponse.json({ error: 'That references something that no longer exists — it may have just been deleted. Reload and try again.' }, { status: 409 });
+      }
       console.error(e);
       return NextResponse.json({ error: 'Internal error' }, { status: 500 });
     }

@@ -16,6 +16,17 @@ export interface QueryParamDef {
   default_value: string | null;
   enum_options: string[] | null;
   label: string | null;
+  /** When true, the form field accepts multiple values (one per line or comma-separated),
+   *  each formatted per data_type and comma-joined — for binds used inside IN (:param). */
+  is_list: boolean;
+}
+
+export interface CategoryRow {
+  id: number;
+  owner_id: number | null;
+  is_public: boolean;
+  name: string;
+  created_at: string;
 }
 
 export interface QueryRow {
@@ -31,6 +42,8 @@ export interface QueryRow {
   body: string;
   department: string | null;
   client_label: string | null;
+  category_id: number | null;
+  category_name?: string | null;
   risk_level: RiskLevel;
   flagged_stale: boolean;
   stale_note: string | null;
@@ -79,6 +92,8 @@ export interface WorkflowRow {
   title: string;
   description: string;
   client_label: string | null;
+  category_id: number | null;
+  category_name?: string | null;
   shared_from: QueryRow['shared_from'];
   flagged_stale: boolean;
   stale_note: string | null;

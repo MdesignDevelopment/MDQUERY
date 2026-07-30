@@ -33,6 +33,21 @@ CREATE TABLE IF NOT EXISTS users (
 ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
 
+-- Categories (§2.8-style organization): private categories belong to one
+-- user, public categories are a shared taxonomy — same public/private split
+-- as queries/workflows themselves. A query's category must live in the same
+-- scope: a private query may use its owner's own private categories or any
+-- public category; a public query may only use a public category.
+CREATE TABLE IF NOT EXISTS categories (
+  id SERIAL PRIMARY KEY,
+  owner_id INT REFERENCES users(id),
+  is_public BOOLEAN NOT NULL DEFAULT FALSE,
+  name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_category_name_public ON categories (lower(name)) WHERE is_public;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_category_name_private ON categories (owner_id, lower(name)) WHERE NOT is_public;
+
 CREATE TABLE IF NOT EXISTS queries (
   id SERIAL PRIMARY KEY,
   owner_id INT REFERENCES users(id),
@@ -46,6 +61,7 @@ CREATE TABLE IF NOT EXISTS queries (
   body TEXT NOT NULL DEFAULT '',
   department TEXT,
   client_label TEXT,
+  category_id INT REFERENCES categories(id) ON DELETE SET NULL,
   risk_level TEXT NOT NULL DEFAULT 'safe' CHECK (risk_level IN ('safe','scoped_write','high_risk')),
   flagged_stale BOOLEAN NOT NULL DEFAULT FALSE,
   stale_note TEXT,
@@ -53,6 +69,7 @@ CREATE TABLE IF NOT EXISTS queries (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_by INT REFERENCES users(id)
 );
+ALTER TABLE queries ADD COLUMN IF NOT EXISTS category_id INT REFERENCES categories(id) ON DELETE SET NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_query_tag_public ON queries (lower(tag)) WHERE is_public;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_query_tag_private ON queries (owner_id, lower(tag)) WHERE NOT is_public;
 
@@ -64,9 +81,11 @@ CREATE TABLE IF NOT EXISTS query_params (
   default_value TEXT,
   enum_options JSONB,
   label TEXT,
+  is_list BOOLEAN NOT NULL DEFAULT FALSE,
   sort INT NOT NULL DEFAULT 0,
   UNIQUE (query_id, name)
 );
+ALTER TABLE query_params ADD COLUMN IF NOT EXISTS is_list BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS query_versions (
   id SERIAL PRIMARY KEY,
@@ -133,12 +152,14 @@ CREATE TABLE IF NOT EXISTS workflows (
   title TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   client_label TEXT,
+  category_id INT REFERENCES categories(id) ON DELETE SET NULL,
   shared_from JSONB,
   flagged_stale BOOLEAN NOT NULL DEFAULT FALSE,
   stale_note TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE workflows ADD COLUMN IF NOT EXISTS category_id INT REFERENCES categories(id) ON DELETE SET NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_wf_tag_public ON workflows (lower(tag)) WHERE is_public;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_wf_tag_private ON workflows (owner_id, lower(tag)) WHERE NOT is_public;
 
@@ -165,6 +186,9 @@ CREATE INDEX IF NOT EXISTS ix_queries_private_scope ON queries (owner_id, update
 CREATE INDEX IF NOT EXISTS ix_queries_public_scope  ON queries (updated_at DESC) WHERE is_public;
 CREATE INDEX IF NOT EXISTS ix_queries_department    ON queries (department);
 CREATE INDEX IF NOT EXISTS ix_queries_client        ON queries (client_label) WHERE client_label IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_queries_category       ON queries (category_id) WHERE category_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_workflows_category      ON workflows (category_id) WHERE category_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_categories_owner        ON categories (owner_id) WHERE NOT is_public;
 CREATE INDEX IF NOT EXISTS ix_favorites_item        ON favorites (item_type, item_id);
 CREATE INDEX IF NOT EXISTS ix_versions_query        ON query_versions (query_id, changed_at DESC);
 CREATE INDEX IF NOT EXISTS ix_wf_steps_wf           ON workflow_steps (workflow_id, step_order);

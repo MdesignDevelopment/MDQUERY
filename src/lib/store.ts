@@ -15,9 +15,9 @@ export class HttpError extends Error {
 
 export async function loadQuery(id: number, user: User): Promise<QueryRow> {
   const { rows } = await query<QueryRow>(
-    `SELECT q.*, u.name AS owner_name,
+    `SELECT q.*, u.name AS owner_name, c.name AS category_name,
             EXISTS (SELECT 1 FROM favorites f WHERE f.user_id = $2 AND f.item_type = 'query' AND f.item_id = q.id) AS favorited
-     FROM queries q LEFT JOIN users u ON u.id = q.owner_id
+     FROM queries q LEFT JOIN users u ON u.id = q.owner_id LEFT JOIN categories c ON c.id = q.category_id
      WHERE q.id = $1`,
     [id, user.id],
   );
@@ -28,9 +28,35 @@ export async function loadQuery(id: number, user: User): Promise<QueryRow> {
   return q;
 }
 
+/**
+ * Validate a requested category assignment against the target item's scope:
+ * a public item may only use a public category; a private item may use a
+ * public category or one of its own owner's private categories. Returns the
+ * category_id to store (unchanged if undefined — "don't touch"; null clears it).
+ */
+export async function resolveCategoryId(
+  categoryId: number | null | undefined,
+  isPublicTarget: boolean,
+  user: User,
+): Promise<number | null | undefined> {
+  if (categoryId === undefined) return undefined;
+  if (categoryId === null) return null;
+  const { rows } = await query<{ id: number; is_public: boolean; owner_id: number | null }>(
+    'SELECT id, is_public, owner_id FROM categories WHERE id = $1',
+    [categoryId],
+  );
+  const cat = rows[0];
+  if (!cat) throw new HttpError(400, 'That category no longer exists — pick another.');
+  if (isPublicTarget && !cat.is_public) throw new HttpError(400, 'Public entries can only use a public category.');
+  if (!isPublicTarget && !cat.is_public && cat.owner_id !== user.id) {
+    throw new HttpError(400, 'You can only use your own private categories, or a public one.');
+  }
+  return categoryId;
+}
+
 export async function loadParams(queryId: number): Promise<QueryParamDef[]> {
   const { rows } = await query<QueryParamDef>(
-    'SELECT name, data_type, default_value, enum_options, label FROM query_params WHERE query_id = $1 ORDER BY sort, name',
+    'SELECT name, data_type, default_value, enum_options, label, is_list FROM query_params WHERE query_id = $1 ORDER BY sort, name',
     [queryId],
   );
   return rows;
@@ -43,6 +69,7 @@ interface SaveInput {
   body?: string;
   department?: string | null;
   client_label?: string | null;
+  category_id?: number | null;
   params?: Partial<QueryParamDef>[];
   confirmations?: string[];
   change_source?: 'manual' | 'ai' | 'restore';
@@ -72,6 +99,7 @@ export async function saveQuery(id: number, user: User, input: SaveInput): Promi
   if (missing.length > 0) {
     throw new HttpError(409, 'This query needs explicit confirmation before it can be saved.', { validation, missing });
   }
+  const categoryId = await resolveCategoryId(input.category_id, existing.is_public, user);
 
   const result = await withTx(async (tx) => {
     // tag uniqueness inside scope
@@ -82,8 +110,8 @@ export async function saveQuery(id: number, user: User, input: SaveInput): Promi
 
     const updated = await tx(
       `UPDATE queries SET tag = $1, title = $2, description = $3, body = $4, department = $5,
-         client_label = $6, risk_level = $7, updated_at = now(), updated_by = $8
-       WHERE id = $9 RETURNING *`,
+         client_label = $6, category_id = $7, risk_level = $8, updated_at = now(), updated_by = $9
+       WHERE id = $10 RETURNING *`,
       [
         tag,
         input.title ?? existing.title,
@@ -91,6 +119,7 @@ export async function saveQuery(id: number, user: User, input: SaveInput): Promi
         body,
         input.department !== undefined ? input.department : existing.department,
         input.client_label !== undefined ? input.client_label : existing.client_label,
+        categoryId !== undefined ? categoryId : existing.category_id,
         validation.risk_level,
         user.id,
         id,
@@ -130,13 +159,14 @@ async function syncParams(
   for (const name of binds) {
     const ov = overrides?.find((o) => o.name === name);
     await tx(
-      `INSERT INTO query_params (query_id, name, data_type, default_value, enum_options, label, sort)
-       VALUES ($1,$2,COALESCE($3,'text'),$4,$5,$6,$7)
+      `INSERT INTO query_params (query_id, name, data_type, default_value, enum_options, label, is_list, sort)
+       VALUES ($1,$2,COALESCE($3,'text'),$4,$5,$6,COALESCE($9,FALSE),$7)
        ON CONFLICT (query_id, name) DO UPDATE SET
          data_type = COALESCE($3, query_params.data_type),
          default_value = CASE WHEN $8 THEN $4 ELSE query_params.default_value END,
          enum_options = CASE WHEN $8 THEN $5 ELSE query_params.enum_options END,
          label = CASE WHEN $8 THEN $6 ELSE query_params.label END,
+         is_list = CASE WHEN $8 THEN COALESCE($9, query_params.is_list) ELSE query_params.is_list END,
          sort = $7`,
       [
         queryId, name,
@@ -146,6 +176,7 @@ async function syncParams(
         ov?.label ?? null,
         sort++,
         !!ov,
+        ov?.is_list ?? null,
       ],
     );
   }
@@ -163,6 +194,7 @@ export async function createQuery(user: User, input: SaveInput & { is_public?: b
   if (!validation.ok) throw new HttpError(422, 'Query has syntax errors.', { validation });
   const missing = missingConfirmations(validation as ValidationResult, input.confirmations ?? []);
   if (missing.length > 0) throw new HttpError(409, 'This query needs explicit confirmation before it can be saved.', { validation, missing });
+  const categoryId = await resolveCategoryId(input.category_id, !!input.is_public, user);
 
   const created = await withTx(async (tx) => {
     const clash = input.is_public
@@ -170,8 +202,8 @@ export async function createQuery(user: User, input: SaveInput & { is_public?: b
       : await tx('SELECT id FROM queries WHERE NOT is_public AND owner_id = $1 AND lower(tag) = lower($2)', [user.id, tag]);
     if (clash.rows.length > 0) throw new HttpError(409, `Tag "${tag}" is already in use in this dictionary.`);
     const res = await tx(
-      `INSERT INTO queries (owner_id, is_public, tag, title, description, body, department, client_label, risk_level, updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      `INSERT INTO queries (owner_id, is_public, tag, title, description, body, department, client_label, category_id, risk_level, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
       [
         input.is_public ? null : user.id,
         !!input.is_public,
@@ -181,6 +213,7 @@ export async function createQuery(user: User, input: SaveInput & { is_public?: b
         body,
         input.department ?? user.department,
         input.client_label ?? null,
+        categoryId ?? null,
         (validation as ValidationResult).risk_level,
         user.id,
       ],
@@ -213,14 +246,14 @@ export async function cloneQuery(publicId: number, user: User): Promise<QueryRow
       tag = `${src.tag}-${++n}`;
     }
     const res = await tx(
-      `INSERT INTO queries (owner_id, is_public, source_query_id, source_body_snapshot, tag, title, description, body, department, client_label, risk_level, updated_by)
-       VALUES ($1, FALSE, $2, $3, $4, $5, $6, $7, $8, NULL, $9, $1) RETURNING *`,
-      [user.id, src.id, src.body, tag, src.title, src.description, src.body, src.department, src.risk_level],
+      `INSERT INTO queries (owner_id, is_public, source_query_id, source_body_snapshot, tag, title, description, body, department, client_label, category_id, risk_level, updated_by)
+       VALUES ($1, FALSE, $2, $3, $4, $5, $6, $7, $8, NULL, $9, $10, $1) RETURNING *`,
+      [user.id, src.id, src.body, tag, src.title, src.description, src.body, src.department, src.category_id, src.risk_level],
     );
     const q = res.rows[0] as QueryRow;
     await tx(
-      `INSERT INTO query_params (query_id, name, data_type, default_value, enum_options, label, sort)
-       SELECT $1, name, data_type, default_value, enum_options, label, sort FROM query_params WHERE query_id = $2`,
+      `INSERT INTO query_params (query_id, name, data_type, default_value, enum_options, label, is_list, sort)
+       SELECT $1, name, data_type, default_value, enum_options, label, is_list, sort FROM query_params WHERE query_id = $2`,
       [q.id, src.id],
     );
     await tx(
@@ -244,9 +277,10 @@ export function workflowRisk(steps: WorkflowStepRow[]): RiskLevel {
 
 export async function loadWorkflow(id: number, user: User): Promise<WorkflowRow> {
   const { rows } = await query<WorkflowRow>(
-    `SELECT w.*, u.name AS owner_name,
+    `SELECT w.*, u.name AS owner_name, c.name AS category_name,
             EXISTS (SELECT 1 FROM favorites f WHERE f.user_id = $2 AND f.item_type = 'workflow' AND f.item_id = w.id) AS favorited
-     FROM workflows w LEFT JOIN users u ON u.id = w.owner_id WHERE w.id = $1`,
+     FROM workflows w LEFT JOIN users u ON u.id = w.owner_id LEFT JOIN categories c ON c.id = w.category_id
+     WHERE w.id = $1`,
     [id, user.id],
   );
   const wf = rows[0];
@@ -259,7 +293,7 @@ export async function loadWorkflow(id: number, user: User): Promise<WorkflowRow>
   );
   // Load params for every step query in one round trip (avoids N+1)
   const paramRows = await query<QueryParamDef & { query_id: number }>(
-    `SELECT query_id, name, data_type, default_value, enum_options, label
+    `SELECT query_id, name, data_type, default_value, enum_options, label, is_list
      FROM query_params WHERE query_id = ANY($1::int[]) ORDER BY sort, name`,
     [steps.rows.map((s) => s.query_id)],
   );

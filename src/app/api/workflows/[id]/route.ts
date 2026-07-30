@@ -1,6 +1,6 @@
 import { handler, json, idParam } from '@/lib/api';
 import { query, withTx } from '@/lib/db';
-import { HttpError, loadWorkflow } from '@/lib/store';
+import { HttpError, loadWorkflow, resolveCategoryId } from '@/lib/store';
 import { validateTag } from '@/lib/params';
 
 export const GET = handler(async (_req, user, params) => {
@@ -15,10 +15,11 @@ export const PUT = handler(async (req, user, params) => {
   const editable = wf.is_public ? user.role === 'curator' || user.role === 'admin' : wf.owner_id === user.id;
   if (!editable) throw new HttpError(403, 'Not editable by you.');
 
-  const { tag, title, description, client_label, steps } = await req.json();
+  const { tag, title, description, client_label, category_id, steps } = await req.json();
   const t = tag ?? wf.tag;
   const tagError = validateTag(t);
   if (tagError) throw new HttpError(400, tagError);
+  const categoryId = await resolveCategoryId(category_id, wf.is_public, user);
 
   await withTx(async (tx) => {
     const clash = wf.is_public
@@ -27,8 +28,8 @@ export const PUT = handler(async (req, user, params) => {
     if (clash.rows.length > 0) throw new HttpError(409, `Workflow tag "${t}" is already in use.`);
 
     await tx(
-      `UPDATE workflows SET tag = $1, title = $2, description = $3, client_label = $4, updated_at = now() WHERE id = $5`,
-      [t, title ?? wf.title, description ?? wf.description, client_label !== undefined ? client_label : wf.client_label, id],
+      `UPDATE workflows SET tag = $1, title = $2, description = $3, client_label = $4, category_id = $5, updated_at = now() WHERE id = $6`,
+      [t, title ?? wf.title, description ?? wf.description, client_label !== undefined ? client_label : wf.client_label, categoryId !== undefined ? categoryId : wf.category_id, id],
     );
     if (Array.isArray(steps)) {
       // steps must reference queries the workflow's audience can read

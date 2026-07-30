@@ -8,6 +8,7 @@ export const GET = handler(async (req, user) => {
   const q = url.searchParams.get('q')?.trim() ?? '';
   const department = url.searchParams.get('department');
   const client = url.searchParams.get('client');
+  const category = url.searchParams.get('category');
   const sort = url.searchParams.get('sort') ?? 'recent';
 
   const where: string[] = [];
@@ -26,6 +27,10 @@ export const GET = handler(async (req, user) => {
     values.push(client);
     where.push(`qq.client_label = $${values.length}`);
   }
+  if (category) {
+    values.push(Number(category));
+    where.push(`qq.category_id = $${values.length}`);
+  }
   const order =
     sort === 'popular'
       ? 'fav_count DESC, qq.updated_at DESC'
@@ -34,12 +39,12 @@ export const GET = handler(async (req, user) => {
         : 'qq.updated_at DESC';
 
   const { rows } = await query(
-    `SELECT qq.id, qq.tag, qq.title, qq.department, qq.client_label, qq.risk_level,
+    `SELECT qq.id, qq.tag, qq.title, qq.department, qq.client_label, qq.category_id, c.name AS category_name, qq.risk_level,
             qq.is_public, qq.flagged_stale, qq.updated_at, qq.source_query_id, qq.shared_from,
             u.name AS owner_name,
             (SELECT count(*)::int FROM favorites f2 WHERE f2.item_type = 'query' AND f2.item_id = qq.id) AS fav_count,
             EXISTS (SELECT 1 FROM favorites f WHERE f.user_id = $1 AND f.item_type = 'query' AND f.item_id = qq.id) AS favorited
-     FROM queries qq LEFT JOIN users u ON u.id = qq.owner_id
+     FROM queries qq LEFT JOIN users u ON u.id = qq.owner_id LEFT JOIN categories c ON c.id = qq.category_id
      WHERE ${where.join(' AND ')}
      ORDER BY ${order}
      LIMIT 500`,

@@ -56,8 +56,8 @@ export const POST = handler(async (req, user, params) => {
         queryIdMap[sq.id] = res.rows[0].id;
         for (const [i, p] of (sq.params ?? []).entries()) {
           await tx(
-            `INSERT INTO query_params (query_id, name, data_type, default_value, enum_options, label, sort) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-            [res.rows[0].id, p.name, p.data_type ?? 'text', p.default_value, p.enum_options ? JSON.stringify(p.enum_options) : null, p.label, i],
+            `INSERT INTO query_params (query_id, name, data_type, default_value, enum_options, label, is_list, sort) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+            [res.rows[0].id, p.name, p.data_type ?? 'text', p.default_value, p.enum_options ? JSON.stringify(p.enum_options) : null, p.label, !!p.is_list, i],
           );
         }
         await tx(
@@ -113,8 +113,8 @@ export const POST = handler(async (req, user, params) => {
     );
     for (const [i, p] of (snap.params ?? []).entries()) {
       await tx(
-        `INSERT INTO query_params (query_id, name, data_type, default_value, enum_options, label, sort) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [res.rows[0].id, p.name, p.data_type ?? 'text', p.default_value, p.enum_options ? JSON.stringify(p.enum_options) : null, p.label, i],
+        `INSERT INTO query_params (query_id, name, data_type, default_value, enum_options, label, is_list, sort) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [res.rows[0].id, p.name, p.data_type ?? 'text', p.default_value, p.enum_options ? JSON.stringify(p.enum_options) : null, p.label, !!p.is_list, i],
       );
     }
     await tx(

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import DiffView from '@/components/DiffView';
 import RiskBadge from '@/components/RiskBadge';
+import { useDialogs } from '@/components/Dialogs';
+import { useUser } from '@/components/UserContext';
 import type { ReviewRequestRow } from '@/lib/types';
 
 /**
@@ -11,6 +13,8 @@ import type { ReviewRequestRow } from '@/lib/types';
  * approve your own) plus stale-flagged public entries.
  */
 export default function ApprovalsPage() {
+  const user = useUser();
+  const { confirm, dialogs } = useDialogs();
   const [reviews, setReviews] = useState<(ReviewRequestRow & { current_public_body?: string | null })[]>([]);
   const [stale, setStale] = useState<any[]>([]);
   const [openId, setOpenId] = useState<number | null>(null);
@@ -42,6 +46,22 @@ export default function ApprovalsPage() {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ action, notes }),
     });
+    const d = await r.json();
+    if (!r.ok) { setNotice(d.error ?? 'Failed'); setTimeout(() => setNotice(''), 3000); return; }
+    setOpenId(null);
+    setDetail(null);
+    load();
+  }
+
+  async function removeRequest(id: number) {
+    const ok = await confirm({
+      title: `Delete request #${id}?`,
+      message: 'Removes it from the queue entirely — for spam, tests, or duplicate submissions. Prefer Reject when the requester should be able to revise and resubmit.',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
+    const r = await fetch(`/api/reviews/${id}`, { method: 'DELETE' });
     const d = await r.json();
     if (!r.ok) { setNotice(d.error ?? 'Failed'); setTimeout(() => setNotice(''), 3000); return; }
     setOpenId(null);
@@ -114,6 +134,9 @@ export default function ApprovalsPage() {
                   <input className="input" placeholder="Review notes (required to reject)…" value={notes} onChange={(e) => setNotes(e.target.value)} />
                   <button className="btn btn-primary" onClick={() => decide(r.id, 'approve')}>Approve & publish</button>
                   <button className="btn btn-danger" onClick={() => decide(r.id, 'reject')}>Reject</button>
+                  {user.role === 'admin' && (
+                    <button className="btn" onClick={() => removeRequest(r.id)} title="Delete without notifying the requester">🗑 Delete</button>
+                  )}
                 </div>
               </div>
             )}
@@ -134,6 +157,7 @@ export default function ApprovalsPage() {
         ))}
         {stale.length === 0 && <div className="text-xs text-ink-faint">No stale flags raised.</div>}
       </section>
+      {dialogs}
     </div>
   );
 }

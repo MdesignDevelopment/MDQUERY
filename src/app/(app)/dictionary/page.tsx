@@ -3,14 +3,18 @@
 import { useState } from 'react';
 import ItemList, { useItemList, type ListItem } from '@/components/ItemList';
 import CreateItemDialog from '@/components/CreateItemDialog';
+import CategoryFilterSelect from '@/components/CategoryFilterSelect';
 
 export default function PrivateDictionaryPage() {
   const [createOpen, setCreateOpen] = useState(false);
+  const [category, setCategory] = useState('');
   const { q, setQ, items, loading, toggleFavorite } = useItemList(async (q) => {
-    const r = await fetch(`/api/queries?scope=private&q=${encodeURIComponent(q)}`);
+    const params = new URLSearchParams({ scope: 'private', q });
+    if (category) params.set('category', category);
+    const r = await fetch(`/api/queries?${params}`);
     const d = await r.json();
     return (d.queries ?? []).map((x: any) => ({ ...x, kind: 'query' }) as ListItem);
-  }, 'dictionary');
+  }, `dictionary:${category}`);
 
   return (
     <div className="flex h-full flex-col">
@@ -24,6 +28,7 @@ export default function PrivateDictionaryPage() {
           onChange={(e) => setQ(e.target.value)}
           aria-label="Filter private queries"
         />
+        <CategoryFilterSelect scope="all" value={category} onChange={setCategory} />
         <span className="flex-1" />
         <button className="btn btn-primary" onClick={() => setCreateOpen(true)}>+ New query</button>
       </header>

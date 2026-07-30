@@ -3,6 +3,36 @@ import { query, withTx } from '@/lib/db';
 import { canReview } from '@/lib/auth';
 import { HttpError, notify } from '@/lib/store';
 
+/**
+ * Delete/withdraw a review request. Admins can remove any request regardless
+ * of status (moderation/cleanup); the original requester can only withdraw
+ * their own request while it's pending, or abandon it once rejected — an
+ * approved request is a historical record of a decision that already
+ * affected the Public Dictionary, so only an admin can remove that one.
+ */
+export const DELETE = handler(async (_req, user, params) => {
+  const id = idParam(params);
+  const { rows } = await query('SELECT * FROM review_requests WHERE id = $1', [id]);
+  const r = rows[0];
+  if (!r) throw new HttpError(404, 'Review request not found');
+
+  const isOwner = r.requested_by === user.id;
+  const allowed = user.role === 'admin' || (isOwner && (r.status === 'pending' || r.status === 'rejected'));
+  if (!allowed) {
+    throw new HttpError(403, isOwner
+      ? 'An approved request is part of the public-dictionary history — ask an admin if it needs removing.'
+      : 'Not your request.');
+  }
+
+  await withTx(async (tx) => {
+    // Detach any resubmission that points to this request as its parent, so
+    // deleting it never trips the parent_request_id foreign key.
+    await tx('UPDATE review_requests SET parent_request_id = NULL WHERE parent_request_id = $1', [id]);
+    await tx('DELETE FROM review_requests WHERE id = $1', [id]);
+  });
+  return json({ ok: true });
+});
+
 export const GET = handler(async (_req, user, params) => {
   const id = idParam(params);
   const { rows } = await query(
@@ -76,8 +106,8 @@ export const POST = handler(async (req, user, params) => {
           [p.tag, p.title, p.description ?? '', p.body, p.department ?? null, p.validation?.risk_level ?? 'safe', user.id],
         );
         await tx(
-          `INSERT INTO query_params (query_id, name, data_type, default_value, enum_options, label, sort)
-           SELECT $1, name, data_type, default_value, enum_options, label, sort FROM query_params WHERE query_id = $2`,
+          `INSERT INTO query_params (query_id, name, data_type, default_value, enum_options, label, is_list, sort)
+           SELECT $1, name, data_type, default_value, enum_options, label, is_list, sort FROM query_params WHERE query_id = $2`,
           [res.rows[0].id, r.item_id],
         );
         await tx(
@@ -119,8 +149,8 @@ export const POST = handler(async (req, user, params) => {
         queryIdMap[sq.id] = res.rows[0].id;
         for (const [i, prm] of (sq.params ?? []).entries()) {
           await tx(
-            `INSERT INTO query_params (query_id, name, data_type, default_value, enum_options, label, sort) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-            [res.rows[0].id, prm.name, prm.data_type ?? 'text', prm.default_value, prm.enum_options ? JSON.stringify(prm.enum_options) : null, prm.label, i],
+            `INSERT INTO query_params (query_id, name, data_type, default_value, enum_options, label, is_list, sort) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+            [res.rows[0].id, prm.name, prm.data_type ?? 'text', prm.default_value, prm.enum_options ? JSON.stringify(prm.enum_options) : null, prm.label, !!prm.is_list, i],
           );
         }
       }

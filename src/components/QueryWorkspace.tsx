@@ -11,6 +11,7 @@ import DiffView from './DiffView';
 import RiskBadge from './RiskBadge';
 import ShareDialog from './ShareDialog';
 import ConfirmSaveDialog from './ConfirmSaveDialog';
+import CategoryPicker from './CategoryPicker';
 import { SkeletonWorkspace } from './Skeleton';
 import { useDialogs } from './Dialogs';
 import { validateSql } from '@/lib/validation';
@@ -22,7 +23,7 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
   const [q, setQ] = useState<QueryRow | null>(null);
   const [sourceUpdate, setSourceUpdate] = useState<{ source_id: number; source_body: string } | null>(null);
   const [body, setBody] = useState('');
-  const [meta, setMeta] = useState({ tag: '', title: '', description: '', client_label: '' });
+  const [meta, setMeta] = useState<{ tag: string; title: string; description: string; client_label: string; category_id: number | null; category_name: string | null }>({ tag: '', title: '', description: '', client_label: '', category_id: null, category_name: null });
   const [mode, setMode] = useState<'editor' | 'form'>('editor');
   const [findings, setFindings] = useState<LintFinding[]>([]);
   const [risk, setRisk] = useState<QueryRow['risk_level']>('safe');
@@ -36,6 +37,7 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
   const [versionBodies, setVersionBodies] = useState<Record<number, string>>({});
   const [showSourceDiff, setShowSourceDiff] = useState(false);
   const [notice, setNotice] = useState('');
+  const [noticeIsError, setNoticeIsError] = useState(false);
   const [aiOpen, setAiOpen] = useState(true);
   const [exportTarget, setExportTarget] = useState<'sqldev' | 'sqlplus'>('sqldev');
 
@@ -52,7 +54,7 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
       setQ(d.query);
       setSourceUpdate(d.source_update);
       setBody(d.query.body);
-      setMeta({ tag: d.query.tag, title: d.query.title, description: d.query.description ?? '', client_label: d.query.client_label ?? '' });
+      setMeta({ tag: d.query.tag, title: d.query.title, description: d.query.description ?? '', client_label: d.query.client_label ?? '', category_id: d.query.category_id ?? null, category_name: d.query.category_name ?? null });
       setRisk(d.query.risk_level);
       setDirty(false);
     };
@@ -88,34 +90,47 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
     return () => clearTimeout(t);
   }, [body, q]);
 
-  function flash(msg: string) {
+  function flash(msg: string, isError = false) {
     setNotice(msg);
-    setTimeout(() => setNotice(''), 2500);
+    setNoticeIsError(isError);
+    setTimeout(() => setNotice(''), isError ? 6000 : 2500);
   }
 
   const save = useCallback(async (confirmations: string[] = [], changeSource: 'manual' | 'ai' = 'manual') => {
     if (!editable || saving) return;
     setSaving(true);
     try {
-      const r = await fetch(`/api/queries/${id}`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          ...meta,
-          client_label: meta.client_label || null,
-          body,
-          confirmations,
-          change_source: changeSource,
-          params: q?.params?.map((p) => ({ name: p.name, data_type: p.data_type, default_value: p.default_value, label: p.label, enum_options: p.enum_options })),
-        }),
-      });
-      const d = await r.json();
+      let r: Response;
+      try {
+        r = await fetch(`/api/queries/${id}`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            ...meta,
+            client_label: meta.client_label || null,
+            body,
+            confirmations,
+            change_source: changeSource,
+            params: q?.params?.map((p) => ({ name: p.name, data_type: p.data_type, default_value: p.default_value, label: p.label, enum_options: p.enum_options, is_list: p.is_list })),
+          }),
+        });
+      } catch {
+        flash('Save failed — network error. Your edits are still here; try again.', true);
+        return;
+      }
+      let d: any;
+      try {
+        d = await r.json();
+      } catch {
+        flash(`Save failed — unexpected server response (${r.status}). Your edits are still here; try again.`, true);
+        return;
+      }
       if (r.status === 409 && d.missing) {
         setConfirmNeeded({ missing: d.missing, findings: d.validation?.findings ?? [] });
         return;
       }
       if (!r.ok) {
-        flash(d.error ?? 'Save failed');
+        flash(d.error ?? 'Save failed', true);
         if (d.validation) setFindings(d.validation.findings);
         return;
       }
@@ -146,7 +161,7 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
   async function clone() {
     const r = await fetch(`/api/queries/${id}/clone`, { method: 'POST' });
     const d = await r.json();
-    if (!r.ok) return flash(d.error ?? 'Clone failed');
+    if (!r.ok) return flash(d.error ?? 'Clone failed', true);
     router.push(`/queries/${d.query.id}`);
   }
 
@@ -161,19 +176,19 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
     if (!ok) return;
     const r = await fetch(`/api/queries/${id}`, { method: 'DELETE' });
     if (r.ok) router.push(q.is_public ? '/public' : '/dictionary');
-    else flash((await r.json()).error ?? 'Delete failed');
+    else flash((await r.json()).error ?? 'Delete failed', true);
   }
 
   async function proposePromotion() {
     if (!q) return;
-    if (dirty) return flash('Save your changes first, then promote.');
+    if (dirty) return flash('Save your changes first, then promote.', true);
     const r = await fetch('/api/reviews', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ item_type: 'query', item_id: q.id, request_type: 'new_promotion' }),
     });
     const d = await r.json();
-    if (!r.ok) return flash(d.error ?? 'Failed');
+    if (!r.ok) return flash(d.error ?? 'Failed', true);
     flash('Promotion request submitted — a peer reviewer or curator must approve it.');
   }
 
@@ -188,7 +203,7 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
       }),
     });
     const d = await r.json();
-    if (!r.ok) return flash(d.error ?? 'Failed');
+    if (!r.ok) return flash(d.error ?? 'Failed', true);
     flash('Proposed edit submitted for review — the public entry is unchanged until approved.');
     setBody(q.body); // revert local buffer to published state
     setDirty(false);
@@ -207,7 +222,7 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
     if (!note) return;
     const r = await fetch(`/api/queries/${id}/flag`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'flag', note }) });
     if (r.ok) { flash('Flagged for curator attention (entry stays published).'); load(); }
-    else flash((await r.json()).error ?? 'Failed');
+    else flash((await r.json()).error ?? 'Failed', true);
   }
 
   async function resolveStale() {
@@ -241,10 +256,10 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
     const r = await fetch(`/api/queries/${id}/versions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ version_id: vid }) });
     const d = await r.json();
     if (r.status === 409 && d.missing) {
-      flash('That version contains high-risk statements — open it, review, and save with confirmation.');
+      flash('That version contains high-risk statements — open it, review, and save with confirmation.', true);
       return;
     }
-    if (!r.ok) return flash(d.error ?? 'Restore failed');
+    if (!r.ok) return flash(d.error ?? 'Restore failed', true);
     setVersionsOpen(false);
     load();
     flash('Version restored (recorded as a new version).');
@@ -279,7 +294,7 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
         )}
         <RiskBadge level={risk} />
         <span className="flex-1" />
-        {notice && <span className="text-[var(--risk-safe)]">{notice}</span>}
+        {notice && <span style={{ color: noticeIsError ? 'var(--risk-high)' : 'var(--risk-safe)' }}>{notice}</span>}
       </div>
 
       {/* Meta + actions */}
@@ -289,6 +304,13 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
         {!q.is_public && (
           <input className="input mono w-32" value={meta.client_label} disabled={!editable} onChange={(e) => { setMeta({ ...meta, client_label: e.target.value }); setDirty(true); }} aria-label="Client/engagement label" placeholder="client label" title="Organizational tag only — no connection or credentials attached" />
         )}
+        <CategoryPicker
+          value={meta.category_id}
+          currentName={meta.category_name}
+          isPublicTarget={q.is_public}
+          disabled={!editable}
+          onChange={(category_id) => { setMeta({ ...meta, category_id }); setDirty(true); }}
+        />
         <span className="flex-1" />
         <button className={`btn ${q.favorited ? 'text-[var(--risk-warn)]' : ''}`} onClick={toggleFavorite} title="Star / unstar" aria-label="Toggle favorite">★</button>
         <button className="btn" onClick={copyBody} title="Copy raw query body">⧉ Copy</button>
@@ -371,8 +393,8 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
               values={formValues}
               onValues={setFormValues}
               onCopyResolved={() => flash('Copied resolved query (values substituted)')}
-              onTypeChange={editable ? (name, dt) => {
-                setQ({ ...q, params: q.params?.map((p) => (p.name === name ? { ...p, data_type: dt } : p)) });
+              onVariableTypeChange={editable ? (name, dataType, isList) => {
+                setQ({ ...q, params: q.params?.map((p) => (p.name === name ? { ...p, data_type: dataType, is_list: isList } : p)) });
                 setDirty(true);
               } : undefined}
             />
@@ -411,7 +433,8 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
           onClose={() => setShareOpen(false)}
           onShare={async (ids) => {
             const r = await fetch(`/api/queries/${id}/share`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ to_user_ids: ids }) });
-            flash(r.ok ? 'Shared — recipients will find it in their inbox.' : (await r.json()).error ?? 'Share failed');
+            if (r.ok) flash('Shared — recipients will find it in their inbox.');
+            else flash((await r.json()).error ?? 'Share failed', true);
           }}
         />
       )}

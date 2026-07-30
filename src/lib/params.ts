@@ -53,11 +53,26 @@ export function formatLiteral(value: string, dataType: string): string {
 }
 
 /**
+ * Format a multi-value field (one value per line, or comma-separated) as a
+ * comma-joined list of literals — for binds used inside IN (:param). The
+ * query text supplies the parentheses itself (e.g. `IN (:ids)`); this only
+ * produces the inner list.
+ */
+export function formatListLiteral(raw: string, dataType: string): string {
+  const tokens = raw
+    .split(/[\n\r,]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0);
+  if (tokens.length === 0) return 'NULL';
+  return tokens.map((t) => formatLiteral(t, dataType)).join(', ');
+}
+
+/**
  * Substitute bind variables with literal values (Form Mode "resolved copy").
  * Only touches binds outside strings/comments.
  */
 export function resolveBinds(body: string, values: Record<string, string>, defs: QueryParamDef[]): string {
-  const typeOf = (name: string) => defs.find((d) => d.name === name)?.data_type ?? 'text';
+  const defOf = (name: string) => defs.find((d) => d.name === name);
   let out = '';
   let state: 'code' | 'lc' | 'bc' | 'str' | 'dq' = 'code';
   for (let i = 0; i < body.length; i++) {
@@ -72,7 +87,10 @@ export function resolveBinds(body: string, values: Record<string, string>, defs:
         while (j < body.length && /\w/.test(body[j])) j++;
         const name = body.slice(i + 1, j).toLowerCase();
         if (name !== 'old' && name !== 'new' && name in values) {
-          out += formatLiteral(values[name], typeOf(name));
+          const def = defOf(name);
+          out += def?.is_list
+            ? formatListLiteral(values[name], def.data_type)
+            : formatLiteral(values[name], def?.data_type ?? 'text');
           i = j - 1;
           continue;
         }

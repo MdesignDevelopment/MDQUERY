@@ -15,6 +15,8 @@ export interface ListItem {
   description?: string;
   department?: string | null;
   client_label?: string | null;
+  category_id?: number | null;
+  category_name?: string | null;
   risk_level?: RiskLevel;
   is_public: boolean;
   flagged_stale?: boolean;
@@ -78,6 +80,7 @@ export default function ItemList({ items, onToggleFavorite, emptyText, loading }
       {item.shared_from != null && <span className="badge border border-edge text-ink-faint" title="Shared to you by a colleague">shared-in</span>}
       {item.source_query_id != null && <span className="badge border border-edge text-ink-faint" title="Cloned from the Public Dictionary">clone</span>}
       {item.client_label && <span className="badge border border-edge text-ink-faint">{item.client_label}</span>}
+      {item.category_name && <span className="badge" style={{ color: 'var(--accent-hi)', border: '1px solid var(--accent)', background: 'rgba(14,99,156,.1)' }}>{item.category_name}</span>}
       {item.department && <span className="hidden text-[10px] uppercase text-ink-faint md:inline">{item.department}</span>}
       {typeof item.step_count === 'number' && <span className="mono text-[10px] text-ink-faint">{item.step_count} steps</span>}
       {item.risk_level && <RiskBadge level={item.risk_level} />}

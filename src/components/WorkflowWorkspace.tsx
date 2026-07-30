@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import RiskBadge from './RiskBadge';
 import ShareDialog from './ShareDialog';
+import CategoryPicker from './CategoryPicker';
 import { SkeletonWorkspace } from './Skeleton';
 import { useDialogs } from './Dialogs';
 import { fetchJsonCached, getCache, setCache } from '@/lib/clientCache';
@@ -26,11 +27,12 @@ type StepDraft = {
 export default function WorkflowWorkspace({ id, user }: { id: number; user: User }) {
   const router = useRouter();
   const [wf, setWf] = useState<WorkflowRow | null>(null);
-  const [meta, setMeta] = useState({ tag: '', title: '', description: '', client_label: '' });
+  const [meta, setMeta] = useState<{ tag: string; title: string; description: string; client_label: string; category_id: number | null; category_name: string | null }>({ tag: '', title: '', description: '', client_label: '', category_id: null, category_name: null });
   const [steps, setSteps] = useState<StepDraft[]>([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
+  const [noticeIsError, setNoticeIsError] = useState(false);
   const [view, setView] = useState<'build' | 'run'>('build');
   const [values, setValues] = useState<Record<number, Record<string, string>>>({}); // stepIndex(1-based) -> param -> value
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -50,7 +52,7 @@ export default function WorkflowWorkspace({ id, user }: { id: number; user: User
     const url = `/api/workflows/${id}`;
     const applyData = (d: any) => {
       setWf(d.workflow);
-      setMeta({ tag: d.workflow.tag, title: d.workflow.title, description: d.workflow.description ?? '', client_label: d.workflow.client_label ?? '' });
+      setMeta({ tag: d.workflow.tag, title: d.workflow.title, description: d.workflow.description ?? '', client_label: d.workflow.client_label ?? '', category_id: d.workflow.category_id ?? null, category_name: d.workflow.category_name ?? null });
       setSteps((d.workflow.steps ?? []).map((s: WorkflowStepRow) => ({ query_id: s.query_id, param_bindings: s.param_bindings ?? {}, note: s.note, query: s.query })));
       setDirty(false);
       // Fresh workflow: open the step picker right away so the next action is obvious
@@ -92,19 +94,35 @@ export default function WorkflowWorkspace({ id, user }: { id: number; user: User
     };
   }, [pickerQ, pickerOpen]);
 
-  function flash(msg: string) { setNotice(msg); setTimeout(() => setNotice(''), 2500); }
+  function flash(msg: string, isError = false) {
+    setNotice(msg);
+    setNoticeIsError(isError);
+    setTimeout(() => setNotice(''), isError ? 6000 : 2500);
+  }
 
   async function save() {
     if (!editable || saving) return;
     setSaving(true);
     try {
-      const r = await fetch(`/api/workflows/${id}`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ...meta, client_label: meta.client_label || null, steps: steps.map((s) => ({ query_id: s.query_id, param_bindings: s.param_bindings, note: s.note })) }),
-      });
-      const d = await r.json();
-      if (!r.ok) return flash(d.error ?? 'Save failed');
+      let r: Response;
+      try {
+        r = await fetch(`/api/workflows/${id}`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ...meta, client_label: meta.client_label || null, steps: steps.map((s) => ({ query_id: s.query_id, param_bindings: s.param_bindings, note: s.note })) }),
+        });
+      } catch {
+        flash('Save failed — network error. Your edits are still here; try again.', true);
+        return;
+      }
+      let d: any;
+      try {
+        d = await r.json();
+      } catch {
+        flash(`Save failed — unexpected server response (${r.status}). Your edits are still here; try again.`, true);
+        return;
+      }
+      if (!r.ok) return flash(d.error ?? 'Save failed', true);
       setWf(d.workflow);
       setSteps((d.workflow.steps ?? []).map((s: WorkflowStepRow) => ({ query_id: s.query_id, param_bindings: s.param_bindings ?? {}, note: s.note, query: s.query })));
       setDirty(false);
@@ -185,14 +203,15 @@ export default function WorkflowWorkspace({ id, user }: { id: number; user: User
   }
 
   async function promote() {
-    if (dirty) return flash('Save first, then promote.');
+    if (dirty) return flash('Save first, then promote.', true);
     const r = await fetch('/api/reviews', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ item_type: 'workflow', item_id: id, request_type: 'new_promotion' }),
     });
     const d = await r.json();
-    flash(r.ok ? 'Promotion request submitted for peer review.' : d.error ?? 'Failed');
+    if (r.ok) flash('Promotion request submitted for peer review.');
+    else flash(d.error ?? 'Failed', true);
   }
 
   async function del() {
@@ -238,7 +257,7 @@ export default function WorkflowWorkspace({ id, user }: { id: number; user: User
         {wf.risk_level && <RiskBadge level={wf.risk_level} />}
         <span className="text-[10px] text-ink-faint">risk = highest-risk step</span>
         <span className="flex-1" />
-        {notice && <span className="text-[var(--risk-safe)]">{notice}</span>}
+        {notice && <span style={{ color: noticeIsError ? 'var(--risk-high)' : 'var(--risk-safe)' }}>{notice}</span>}
       </div>
 
       <div className="flex flex-wrap items-center gap-2 border-b border-edge bg-panel px-4 py-2">
@@ -247,6 +266,13 @@ export default function WorkflowWorkspace({ id, user }: { id: number; user: User
         {!wf.is_public && (
           <input className="input mono w-32" value={meta.client_label} disabled={!editable} placeholder="client label" onChange={(e) => { setMeta({ ...meta, client_label: e.target.value }); setDirty(true); }} aria-label="Client label" />
         )}
+        <CategoryPicker
+          value={meta.category_id}
+          currentName={meta.category_name}
+          isPublicTarget={wf.is_public}
+          disabled={!editable}
+          onChange={(category_id) => { setMeta({ ...meta, category_id }); setDirty(true); }}
+        />
         <div className="mono flex rounded-sm border border-edge text-[11px]">
           {(['build', 'run'] as const).map((v) => (
             <button key={v} onClick={() => setView(v)} className={`px-2.5 py-0.5 ${view === v ? 'bg-panel-2 text-ink' : 'text-ink-faint'}`}>{v}</button>
@@ -331,7 +357,21 @@ export default function WorkflowWorkspace({ id, user }: { id: number; user: User
                   <div className="space-y-1.5">
                     {(q.params ?? []).map((p) => {
                       const bound = s.param_bindings[p.name]?.source;
-                      return (
+                      const carried = bound && effectiveValue(i + 1, p.name) !== (values[i + 1]?.[p.name] ?? '');
+                      return p.is_list ? (
+                        <label key={p.name} className="block text-[11px]">
+                          <span className="mono mb-1 flex items-center gap-2 text-[var(--accent-hi)]">
+                            :{p.name}
+                            {carried && <span className="text-[10px] text-[var(--risk-safe)]" title={`carried from ${bound}`}>⇐ {effectiveValue(i + 1, p.name)}</span>}
+                          </span>
+                          <textarea
+                            className="input mono h-14 resize-none"
+                            placeholder={`one ${p.data_type} per line, or comma-separated`}
+                            value={values[i + 1]?.[p.name] ?? ''}
+                            onChange={(e) => setValues({ ...values, [i + 1]: { ...values[i + 1], [p.name]: e.target.value } })}
+                          />
+                        </label>
+                      ) : (
                         <label key={p.name} className="flex items-center gap-2 text-[11px]">
                           <span className="mono w-36 shrink-0 text-[var(--accent-hi)]">:{p.name}</span>
                           <input
@@ -341,7 +381,7 @@ export default function WorkflowWorkspace({ id, user }: { id: number; user: User
                             value={values[i + 1]?.[p.name] ?? ''}
                             onChange={(e) => setValues({ ...values, [i + 1]: { ...values[i + 1], [p.name]: e.target.value } })}
                           />
-                          {bound && effectiveValue(i + 1, p.name) !== (values[i + 1]?.[p.name] ?? '') && (
+                          {carried && (
                             <span className="mono shrink-0 text-[10px] text-[var(--risk-safe)]" title={`carried from ${bound}`}>⇐ {effectiveValue(i + 1, p.name)}</span>
                           )}
                         </label>
@@ -400,7 +440,8 @@ export default function WorkflowWorkspace({ id, user }: { id: number; user: User
           onClose={() => setShareOpen(false)}
           onShare={async (ids) => {
             const r = await fetch(`/api/workflows/${id}/share`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ to_user_ids: ids }) });
-            flash(r.ok ? 'Workflow shared (steps included as copies).' : (await r.json()).error ?? 'Share failed');
+            if (r.ok) flash('Workflow shared (steps included as copies).');
+            else flash((await r.json()).error ?? 'Share failed', true);
           }}
         />
       )}
