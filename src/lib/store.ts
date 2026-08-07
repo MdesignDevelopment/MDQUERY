@@ -1,4 +1,5 @@
 import { query, withTx } from './db';
+import { isCuratorOrAdmin } from './auth';
 import { detectBinds, validateTag } from './params';
 import { validateSql, missingConfirmations } from './validation';
 import { sanitizeDocumentationHtml } from './sanitize';
@@ -68,7 +69,6 @@ interface SaveInput {
   title?: string;
   description?: string;
   body?: string;
-  documentation?: string;
   department?: string | null;
   client_label?: string | null;
   category_id?: number | null;
@@ -102,7 +102,6 @@ export async function saveQuery(id: number, user: User, input: SaveInput): Promi
     throw new HttpError(409, 'This query needs explicit confirmation before it can be saved.', { validation, missing });
   }
   const categoryId = await resolveCategoryId(input.category_id, existing.is_public, user);
-  const documentation = input.documentation !== undefined ? sanitizeDocumentationHtml(input.documentation) : undefined;
 
   const result = await withTx(async (tx) => {
     // tag uniqueness inside scope
@@ -113,8 +112,8 @@ export async function saveQuery(id: number, user: User, input: SaveInput): Promi
 
     const updated = await tx(
       `UPDATE queries SET tag = $1, title = $2, description = $3, body = $4, department = $5,
-         client_label = $6, category_id = $7, risk_level = $8, documentation = $9, updated_at = now(), updated_by = $10
-       WHERE id = $11 RETURNING *`,
+         client_label = $6, category_id = $7, risk_level = $8, updated_at = now(), updated_by = $9
+       WHERE id = $10 RETURNING *`,
       [
         tag,
         input.title ?? existing.title,
@@ -124,7 +123,6 @@ export async function saveQuery(id: number, user: User, input: SaveInput): Promi
         input.client_label !== undefined ? input.client_label : existing.client_label,
         categoryId !== undefined ? categoryId : existing.category_id,
         validation.risk_level,
-        documentation !== undefined ? documentation : existing.documentation,
         user.id,
         id,
       ],
@@ -148,6 +146,25 @@ export async function saveQuery(id: number, user: User, input: SaveInput): Promi
 
   result.params = await loadParams(id);
   return { query: result, validation };
+}
+
+/**
+ * Documentation has its own save action, independent of the SQL body save
+ * pipeline above, and its own (stricter) permission: curators/admins only,
+ * regardless of who owns the query or whether it's public — unlike the SQL
+ * body, it isn't gated by ownership.
+ */
+export async function saveQueryDocumentation(id: number, user: User, html: string): Promise<QueryRow> {
+  await loadQuery(id, user); // throws 404/403 per the usual visibility rule
+  if (!isCuratorOrAdmin(user)) throw new HttpError(403, 'Only curators/admins can edit documentation.');
+  const documentation = sanitizeDocumentationHtml(html);
+  const { rows } = await query<QueryRow>(
+    `UPDATE queries SET documentation = $1, updated_at = now(), updated_by = $2 WHERE id = $3 RETURNING *`,
+    [documentation, user.id, id],
+  );
+  const q = rows[0];
+  q.params = await loadParams(id);
+  return q;
 }
 
 /** Keep query_params in sync with binds detected in the body, preserving existing config. */

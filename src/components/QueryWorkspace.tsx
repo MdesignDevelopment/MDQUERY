@@ -32,6 +32,8 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [docDirty, setDocDirty] = useState(false);
+  const [docSaving, setDocSaving] = useState(false);
   const [confirmNeeded, setConfirmNeeded] = useState<{ missing: string[]; findings: LintFinding[] } | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);
@@ -60,6 +62,7 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
       setMeta({ tag: d.query.tag, title: d.query.title, description: d.query.description ?? '', client_label: d.query.client_label ?? '', category_id: d.query.category_id ?? null, category_name: d.query.category_name ?? null });
       setRisk(d.query.risk_level);
       setDirty(false);
+      setDocDirty(false);
     };
     // Stale-while-revalidate: paint cached data instantly (warmed by row-hover
     // prefetch), then refresh from the server in the background.
@@ -112,7 +115,6 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
             ...meta,
             client_label: meta.client_label || null,
             body,
-            documentation,
             confirmations,
             change_source: changeSource,
             params: q?.params?.map((p) => ({ name: p.name, data_type: p.data_type, default_value: p.default_value, label: p.label, enum_options: p.enum_options, is_list: p.is_list })),
@@ -140,14 +142,37 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
       }
       setQ(d.query);
       setRisk(d.query.risk_level);
-      setDocumentation(d.query.documentation ?? '');
       setDirty(false);
       setCache(`/api/queries/${id}`, { query: d.query, source_update: null });
       flash('Saved ✓ (version recorded)');
     } finally {
       setSaving(false);
     }
-  }, [editable, saving, id, meta, body, documentation, q]);
+  }, [editable, saving, id, meta, body, q]);
+
+  const saveDocumentation = useCallback(async () => {
+    if (!isCurator || docSaving) return;
+    setDocSaving(true);
+    try {
+      const r = await fetch(`/api/queries/${id}/documentation`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ documentation }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        flash(d.error ?? 'Save failed', true);
+        return;
+      }
+      setQ(d.query);
+      setDocumentation(d.query.documentation ?? '');
+      setDocDirty(false);
+      setCache(`/api/queries/${id}`, { query: d.query, source_update: sourceUpdate });
+      flash('Documentation saved ✓');
+    } finally {
+      setDocSaving(false);
+    }
+  }, [isCurator, docSaving, id, documentation, sourceUpdate]);
 
   async function uploadDocumentationImage(file: File): Promise<string> {
     const form = new FormData();
@@ -418,9 +443,12 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
           ) : (
             <DocumentationEditor
               value={documentation}
-              onChange={(html) => { setDocumentation(html); setDirty(true); }}
-              editable={editable}
+              onChange={(html) => { setDocumentation(html); setDocDirty(true); }}
+              editable={isCurator}
               onUploadImage={uploadDocumentationImage}
+              dirty={docDirty}
+              saving={docSaving}
+              onSave={saveDocumentation}
             />
           )}
 

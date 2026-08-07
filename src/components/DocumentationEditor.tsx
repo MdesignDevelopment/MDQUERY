@@ -20,11 +20,17 @@ export default function DocumentationEditor({
   onChange,
   editable,
   onUploadImage,
+  dirty,
+  saving,
+  onSave,
 }: {
   value: string;
   onChange: (html: string) => void;
   editable: boolean;
   onUploadImage: (file: File) => Promise<string>;
+  dirty: boolean;
+  saving: boolean;
+  onSave: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   // null (not `value`) so the first sync effect always runs — the div is
@@ -152,6 +158,10 @@ export default function DocumentationEditor({
           }}
         />
         {error && <span className="ml-2 text-[11px]" style={{ color: 'var(--risk-high)' }}>{error}</span>}
+        <span className="flex-1" />
+        <button type="button" className="btn btn-primary px-2 py-0.5" disabled={!dirty || saving} onMouseDown={(e) => e.preventDefault()} onClick={onSave} title="Save documentation">
+          {saving ? 'Saving…' : dirty ? 'Save' : 'Saved'}
+        </button>
       </div>
 
       <div

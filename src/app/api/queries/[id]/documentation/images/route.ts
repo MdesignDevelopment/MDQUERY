@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { put } from '@vercel/blob';
 import { handler, json, idParam } from '@/lib/api';
+import { isCuratorOrAdmin } from '@/lib/auth';
 import { HttpError, loadQuery } from '@/lib/store';
 
 /**
@@ -11,10 +12,8 @@ import { HttpError, loadQuery } from '@/lib/store';
  * path instead of the blob's storage URL; see
  * src/app/api/blob/documentation/[id]/[filename]/route.ts for the read side.
  *
- * Gated by the exact same edit permission as the query body itself (private
- * owner, or curator/admin for public entries) — documentation isn't yet
- * part of the public "propose edit" review flow, so only direct-edit
- * holders can attach images (§ README v1 scoping).
+ * Gated the same as saveQueryDocumentation: curators/admins only, regardless
+ * of query ownership or public/private status.
  */
 const ALLOWED_TYPES: Record<string, string> = {
   'image/png': 'png',
@@ -26,9 +25,8 @@ const MAX_BYTES = 8 * 1024 * 1024;
 
 export const POST = handler(async (req, user, params) => {
   const id = idParam(params);
-  const q = await loadQuery(id, user);
-  const editable = !q.is_public ? q.owner_id === user.id : (user.role === 'curator' || user.role === 'admin');
-  if (!editable) throw new HttpError(403, 'You do not have edit access to this query.');
+  await loadQuery(id, user); // throws 404/403 per the usual visibility rule
+  if (!isCuratorOrAdmin(user)) throw new HttpError(403, 'Only curators/admins can edit documentation.');
 
   if (!process.env.BLOB_READ_WRITE_TOKEN) {
     throw new HttpError(503, 'Image storage is not configured (BLOB_READ_WRITE_TOKEN unset) — see .env.example.');
