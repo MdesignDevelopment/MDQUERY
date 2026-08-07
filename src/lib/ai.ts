@@ -29,8 +29,15 @@ export function providerConfigured(): boolean {
   return !!process.env.AI_BASE_URL;
 }
 
+// Groq rejects `reasoning_format` outright (400) for models that don't
+// support it — it's not a universally-ignored param like on most
+// OpenAI-compatible providers, so only send it for Groq's actual reasoning
+// models (the documented default, llama-3.3-70b-versatile, isn't one).
+const GROQ_REASONING_MODEL = /deepseek-r1|qwq|gpt-oss/i;
+
 export async function streamChat(mode: AiMode, queryBody: string, instruction: string): Promise<ReadableStream<Uint8Array>> {
   const base = process.env.AI_BASE_URL!;
+  const model = process.env.AI_MODEL ?? 'llama-3.3-70b-versatile';
   const res = await fetch(`${base.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -38,11 +45,11 @@ export async function streamChat(mode: AiMode, queryBody: string, instruction: s
       ...(process.env.AI_API_KEY ? { authorization: `Bearer ${process.env.AI_API_KEY}` } : {}),
     },
     body: JSON.stringify({
-      model: process.env.AI_MODEL ?? 'llama-3.3-70b-versatile',
+      model,
       stream: true,
       temperature: 0.2,
       // Groq: keep reasoning-model think-traces out of the content stream (ignored by other providers)
-      ...(base.includes('groq.com') ? { reasoning_format: 'hidden' } : {}),
+      ...(base.includes('groq.com') && GROQ_REASONING_MODEL.test(model) ? { reasoning_format: 'hidden' } : {}),
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         {

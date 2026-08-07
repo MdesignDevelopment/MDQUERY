@@ -6,6 +6,7 @@ import Link from 'next/link';
 import Editor from './Editor';
 import ValidationPanel from './ValidationPanel';
 import FormMode from './FormMode';
+import DocumentationEditor from './DocumentationEditor';
 import AiSidebar from './AiSidebar';
 import DiffView from './DiffView';
 import RiskBadge from './RiskBadge';
@@ -23,8 +24,9 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
   const [q, setQ] = useState<QueryRow | null>(null);
   const [sourceUpdate, setSourceUpdate] = useState<{ source_id: number; source_body: string } | null>(null);
   const [body, setBody] = useState('');
+  const [documentation, setDocumentation] = useState('');
   const [meta, setMeta] = useState<{ tag: string; title: string; description: string; client_label: string; category_id: number | null; category_name: string | null }>({ tag: '', title: '', description: '', client_label: '', category_id: null, category_name: null });
-  const [mode, setMode] = useState<'editor' | 'form'>('editor');
+  const [mode, setMode] = useState<'editor' | 'form' | 'documentation'>('editor');
   const [findings, setFindings] = useState<LintFinding[]>([]);
   const [risk, setRisk] = useState<QueryRow['risk_level']>('safe');
   const [formValues, setFormValues] = useState<Record<string, string>>({});
@@ -54,6 +56,7 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
       setQ(d.query);
       setSourceUpdate(d.source_update);
       setBody(d.query.body);
+      setDocumentation(d.query.documentation ?? '');
       setMeta({ tag: d.query.tag, title: d.query.title, description: d.query.description ?? '', client_label: d.query.client_label ?? '', category_id: d.query.category_id ?? null, category_name: d.query.category_name ?? null });
       setRisk(d.query.risk_level);
       setDirty(false);
@@ -109,6 +112,7 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
             ...meta,
             client_label: meta.client_label || null,
             body,
+            documentation,
             confirmations,
             change_source: changeSource,
             params: q?.params?.map((p) => ({ name: p.name, data_type: p.data_type, default_value: p.default_value, label: p.label, enum_options: p.enum_options, is_list: p.is_list })),
@@ -136,13 +140,23 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
       }
       setQ(d.query);
       setRisk(d.query.risk_level);
+      setDocumentation(d.query.documentation ?? '');
       setDirty(false);
       setCache(`/api/queries/${id}`, { query: d.query, source_update: null });
       flash('Saved ✓ (version recorded)');
     } finally {
       setSaving(false);
     }
-  }, [editable, saving, id, meta, body, q]);
+  }, [editable, saving, id, meta, body, documentation, q]);
+
+  async function uploadDocumentationImage(file: File): Promise<string> {
+    const form = new FormData();
+    form.append('file', file);
+    const r = await fetch(`/api/queries/${id}/documentation/images`, { method: 'POST', body: form });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error ?? 'Image upload failed');
+    return d.url as string;
+  }
 
   const saveRef = useRef(save);
   saveRef.current = save;
@@ -373,6 +387,9 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
             <button className={`px-3 py-1 text-[11px] ${mode === 'form' ? 'border-b-2 border-[var(--accent)] text-ink' : 'text-ink-faint'}`} onClick={() => setMode('form')}>
               Form {q.params && q.params.length > 0 && <span className="mono">({q.params.length})</span>}
             </button>
+            <button className={`px-3 py-1 text-[11px] ${mode === 'documentation' ? 'border-b-2 border-[var(--accent)] text-ink' : 'text-ink-faint'}`} onClick={() => setMode('documentation')}>
+              Documentation
+            </button>
             {!editable && <span className="ml-auto px-3 py-1 text-[10px] text-ink-faint">read-only{q.is_public && !isCurator ? ' — edits become proposals' : ''}</span>}
           </div>
 
@@ -386,7 +403,7 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
                 onSave={() => saveRef.current()}
               />
             </div>
-          ) : (
+          ) : mode === 'form' ? (
             <FormMode
               body={body}
               params={q.params ?? []}
@@ -398,9 +415,16 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
                 setDirty(true);
               } : undefined}
             />
+          ) : (
+            <DocumentationEditor
+              value={documentation}
+              onChange={(html) => { setDocumentation(html); setDirty(true); }}
+              editable={editable}
+              onUploadImage={uploadDocumentationImage}
+            />
           )}
 
-          <ValidationPanel findings={findings} />
+          {mode !== 'documentation' && <ValidationPanel findings={findings} />}
         </div>
 
         {aiOpen && <AiSidebar body={body} editable={editable || (q.is_public && !isCurator)} onApply={(nb) => { setBody(nb); setDirty(true); }} />}

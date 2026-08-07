@@ -31,6 +31,7 @@ The app runs on Vercel with a hosted Postgres database (Neon) instead of the Doc
    - `DATABASE_URL` — the Neon direct connection string above
    - `SESSION_SECRET` — a long random string (the app refuses to boot in production without one — see [auth.ts](src/lib/auth.ts))
    - `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` — optional; omit for offline-fallback mode
+   - `BLOB_READ_WRITE_TOKEN` — optional, for Documentation-tab image uploads; connect a Blob store under Storage → Blob and Vercel injects this automatically
 4. **Deploy.** Sessions are HTTPS-only cookies in production automatically; the connection pool sizes itself down for serverless concurrency automatically (both are environment-detected, no config needed).
 
 The Docker Compose files (`docker-compose.yml` / `docker-compose.prod.yml`) remain the self-hosted alternative — pick one path or the other, both read from the same `.env` format.
@@ -58,6 +59,7 @@ The Docker Compose files (`docker-compose.yml` / `docker-compose.prod.yml`) rema
 - **Version history** — every save (manual/AI/restore/review) snapshots body+tag+title+risk with author; restorable; restores go through the same validation pipeline.
 - **Export** — annotated `.sql` per query or per workflow, SQL Developer or SQL*Plus flavor; resolved values supported.
 - **AI Query Copilot** — right-docked chat panel; Edit (proposed diff with Accept/Reject — never auto-commit), Explain, Review. Server-side proxy only (`/api/ai`); risk-escalation guard (removing WHERE / SELECT→DML) requires extra confirmation; accepted edits still pass full validation on save. **No provider configured → deterministic static-analyzer fallback.** Behavior contract: never claims knowledge of live schemas.
+- **Documentation tab** — third tab next to Editor/Form on every query: free-form rich text (headings, lists, quotes, links) with screenshots dropped/pasted/inserted anywhere in the flow — e.g. the support email a query resolves, illustrated inline. Images upload to a **private** Vercel Blob store (`BLOB_READ_WRITE_TOKEN`; unset → uploads disabled, text still works) and are served back through an authenticated proxy (`/api/blob/documentation/...`) that enforces the exact same view permission as the query itself — never a bare public blob URL, since these screenshots can carry client-sensitive content. Saved HTML is sanitized server-side (allowlist tags/attributes, `https`-only `a` schemes — see [sanitize.ts](src/lib/sanitize.ts)) since it's rendered back with `dangerouslySetInnerHTML`. Same edit gate as the query body (private owner, or curator/admin for public entries) — **not yet part of the public "Propose edit" review flow**; non-curators see a public entry's documentation read-only for now.
 - **UX** — dark-first VS Code-style theme (light available), monospace for code/tags, `Ctrl+K` command palette, collapsible left rail, breadcrumb + PUBLIC/PRIVATE indicator, keyboard save (`Ctrl+S`), aria-labels on icon buttons.
 
 ## Configuration
@@ -67,6 +69,7 @@ The Docker Compose files (`docker-compose.yml` / `docker-compose.prod.yml`) rema
 | `DATABASE_URL` | Platform metadata store (the **only** database this app talks to) |
 | `SESSION_SECRET` | HMAC key for session cookies |
 | `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` | Optional OpenAI-compatible endpoint for the copilot (Groq/Together/Ollama serving an open-weight SQL-capable model). Unset → offline fallback |
+| `BLOB_READ_WRITE_TOKEN` | Optional Vercel Blob store token for Documentation-tab image uploads. Unset → uploads disabled (documentation text still works) |
 
 ## Architecture notes
 

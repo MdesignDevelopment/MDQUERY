@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS queries (
   updated_by INT REFERENCES users(id)
 );
 ALTER TABLE queries ADD COLUMN IF NOT EXISTS category_id INT REFERENCES categories(id) ON DELETE SET NULL;
+ALTER TABLE queries ADD COLUMN IF NOT EXISTS documentation TEXT NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX IF NOT EXISTS uq_query_tag_public ON queries (lower(tag)) WHERE is_public;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_query_tag_private ON queries (owner_id, lower(tag)) WHERE NOT is_public;
 

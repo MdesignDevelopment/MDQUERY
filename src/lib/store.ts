@@ -1,6 +1,7 @@
 import { query, withTx } from './db';
 import { detectBinds, validateTag } from './params';
 import { validateSql, missingConfirmations } from './validation';
+import { sanitizeDocumentationHtml } from './sanitize';
 import type { QueryParamDef, QueryRow, RiskLevel, User, ValidationResult, WorkflowRow, WorkflowStepRow } from './types';
 
 export class HttpError extends Error {
@@ -67,6 +68,7 @@ interface SaveInput {
   title?: string;
   description?: string;
   body?: string;
+  documentation?: string;
   department?: string | null;
   client_label?: string | null;
   category_id?: number | null;
@@ -100,6 +102,7 @@ export async function saveQuery(id: number, user: User, input: SaveInput): Promi
     throw new HttpError(409, 'This query needs explicit confirmation before it can be saved.', { validation, missing });
   }
   const categoryId = await resolveCategoryId(input.category_id, existing.is_public, user);
+  const documentation = input.documentation !== undefined ? sanitizeDocumentationHtml(input.documentation) : undefined;
 
   const result = await withTx(async (tx) => {
     // tag uniqueness inside scope
@@ -110,8 +113,8 @@ export async function saveQuery(id: number, user: User, input: SaveInput): Promi
 
     const updated = await tx(
       `UPDATE queries SET tag = $1, title = $2, description = $3, body = $4, department = $5,
-         client_label = $6, category_id = $7, risk_level = $8, updated_at = now(), updated_by = $9
-       WHERE id = $10 RETURNING *`,
+         client_label = $6, category_id = $7, risk_level = $8, documentation = $9, updated_at = now(), updated_by = $10
+       WHERE id = $11 RETURNING *`,
       [
         tag,
         input.title ?? existing.title,
@@ -121,6 +124,7 @@ export async function saveQuery(id: number, user: User, input: SaveInput): Promi
         input.client_label !== undefined ? input.client_label : existing.client_label,
         categoryId !== undefined ? categoryId : existing.category_id,
         validation.risk_level,
+        documentation !== undefined ? documentation : existing.documentation,
         user.id,
         id,
       ],
@@ -246,9 +250,9 @@ export async function cloneQuery(publicId: number, user: User): Promise<QueryRow
       tag = `${src.tag}-${++n}`;
     }
     const res = await tx(
-      `INSERT INTO queries (owner_id, is_public, source_query_id, source_body_snapshot, tag, title, description, body, department, client_label, category_id, risk_level, updated_by)
-       VALUES ($1, FALSE, $2, $3, $4, $5, $6, $7, $8, NULL, $9, $10, $1) RETURNING *`,
-      [user.id, src.id, src.body, tag, src.title, src.description, src.body, src.department, src.category_id, src.risk_level],
+      `INSERT INTO queries (owner_id, is_public, source_query_id, source_body_snapshot, tag, title, description, body, department, client_label, category_id, risk_level, documentation, updated_by)
+       VALUES ($1, FALSE, $2, $3, $4, $5, $6, $7, $8, NULL, $9, $10, $11, $1) RETURNING *`,
+      [user.id, src.id, src.body, tag, src.title, src.description, src.body, src.department, src.category_id, src.risk_level, src.documentation],
     );
     const q = res.rows[0] as QueryRow;
     await tx(

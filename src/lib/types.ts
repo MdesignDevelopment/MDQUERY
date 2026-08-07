@@ -40,6 +40,7 @@ export interface QueryRow {
   title: string;
   description: string;
   body: string;
+  documentation: string;
   department: string | null;
   client_label: string | null;
   category_id: number | null;

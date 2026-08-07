@@ -24,11 +24,13 @@ services:
       AI_BASE_URL: ${AI_BASE_URL:-}
       AI_API_KEY: ${AI_API_KEY:-}
       AI_MODEL: ${AI_MODEL:-}
+      BLOB_READ_WRITE_TOKEN: ${BLOB_READ_WRITE_TOKEN:-}
       # Windows bind mounts don't propagate file-change events — poll instead so edits hot-reload
       WATCHPACK_POLLING: 'true'
       CHOKIDAR_USEPOLLING: 'true'
     ports:
-      - '3000:3000'
+      # Override with WEB_PORT in .env if 3000 is already taken on the host
+      - '${WEB_PORT:-3000}:3000'
     volumes:
       - .:/app
       - node_modules:/app/node_modules
