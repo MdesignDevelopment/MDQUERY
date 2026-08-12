@@ -102,8 +102,8 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
     setTimeout(() => setNotice(''), isError ? 6000 : 2500);
   }
 
-  const save = useCallback(async (confirmations: string[] = [], changeSource: 'manual' | 'ai' = 'manual') => {
-    if (!editable || saving) return;
+  const save = useCallback(async (confirmations: string[] = [], changeSource: 'manual' | 'ai' = 'manual'): Promise<boolean> => {
+    if (!editable || saving) return false;
     setSaving(true);
     try {
       let r: Response;
@@ -122,36 +122,37 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
         });
       } catch {
         flash('Save failed — network error. Your edits are still here; try again.', true);
-        return;
+        return false;
       }
       let d: any;
       try {
         d = await r.json();
       } catch {
         flash(`Save failed — unexpected server response (${r.status}). Your edits are still here; try again.`, true);
-        return;
+        return false;
       }
       if (r.status === 409 && d.missing) {
         setConfirmNeeded({ missing: d.missing, findings: d.validation?.findings ?? [] });
-        return;
+        return false;
       }
       if (!r.ok) {
         flash(d.error ?? 'Save failed', true);
         if (d.validation) setFindings(d.validation.findings);
-        return;
+        return false;
       }
       setQ(d.query);
       setRisk(d.query.risk_level);
       setDirty(false);
       setCache(`/api/queries/${id}`, { query: d.query, source_update: null });
       flash('Saved ✓ (version recorded)');
+      return true;
     } finally {
       setSaving(false);
     }
   }, [editable, saving, id, meta, body, q]);
 
-  const saveDocumentation = useCallback(async () => {
-    if (!isCurator || docSaving) return;
+  const saveDocumentation = useCallback(async (silent = false): Promise<boolean> => {
+    if (!isCurator || docSaving) return false;
     setDocSaving(true);
     try {
       const r = await fetch(`/api/queries/${id}/documentation`, {
@@ -162,17 +163,28 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
       const d = await r.json();
       if (!r.ok) {
         flash(d.error ?? 'Save failed', true);
-        return;
+        return false;
       }
       setQ(d.query);
       setDocumentation(d.query.documentation ?? '');
       setDocDirty(false);
       setCache(`/api/queries/${id}`, { query: d.query, source_update: sourceUpdate });
-      flash('Documentation saved ✓');
+      if (!silent) flash('Documentation saved ✓');
+      return true;
     } finally {
       setDocSaving(false);
     }
   }, [isCurator, docSaving, id, documentation, sourceUpdate]);
+
+  const saveAll = useCallback(async (confirmations: string[] = [], changeSource: 'manual' | 'ai' = 'manual') => {
+    const savingBoth = dirty && isCurator && docDirty;
+    const bodyOk = dirty ? await save(confirmations, changeSource) : true;
+    if (!bodyOk) return;
+    if (isCurator && docDirty) {
+      const docOk = await saveDocumentation(savingBoth);
+      if (savingBoth && docOk) flash('Saved ✓ (query + documentation)');
+    }
+  }, [dirty, save, isCurator, docDirty, saveDocumentation]);
 
   async function uploadDocumentationImage(file: File): Promise<string> {
     const form = new FormData();
@@ -183,8 +195,8 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
     return d.url as string;
   }
 
-  const saveRef = useRef(save);
-  saveRef.current = save;
+  const saveRef = useRef(saveAll);
+  saveRef.current = saveAll;
 
   async function toggleFavorite() {
     if (!q) return;
@@ -378,8 +390,13 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
           <button className="btn" onClick={del} title="Delete" aria-label="Delete query">🗑</button>
         )}
         {editable && (
-          <button className="btn btn-primary" disabled={!dirty || saving} onClick={() => save()} title="Save (Ctrl+S) — runs full validation">
-            {saving ? 'Saving…' : dirty ? 'Save' : 'Saved'}
+          <button
+            className="btn btn-primary"
+            disabled={(!dirty && !(isCurator && docDirty)) || saving || docSaving}
+            onClick={() => saveAll()}
+            title="Save (Ctrl+S) — runs full validation; also saves documentation if edited"
+          >
+            {saving || docSaving ? 'Saving…' : dirty || (isCurator && docDirty) ? 'Save' : 'Saved'}
           </button>
         )}
         <button className="btn" onClick={() => setAiOpen(!aiOpen)} title="Toggle AI copilot" aria-label="Toggle AI copilot">✦</button>
@@ -448,7 +465,7 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
               onUploadImage={uploadDocumentationImage}
               dirty={docDirty}
               saving={docSaving}
-              onSave={saveDocumentation}
+              onSave={() => saveDocumentation()}
             />
           )}
 
@@ -476,7 +493,7 @@ export default function QueryWorkspace({ id, user }: { id: number; user: User })
           missing={confirmNeeded.missing}
           findings={confirmNeeded.findings}
           onCancel={() => setConfirmNeeded(null)}
-          onConfirm={(c) => { setConfirmNeeded(null); save(c); }}
+          onConfirm={(c) => { setConfirmNeeded(null); saveAll(c); }}
         />
       )}
       {shareOpen && (

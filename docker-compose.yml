@@ -21,9 +21,8 @@ services:
       DATABASE_URL: postgres://mdquery:mdquery@db:5432/mdquery
       # Secrets live in .env (gitignored, read automatically by docker compose) — see .env.example
       SESSION_SECRET: ${SESSION_SECRET:-dev-only-change-in-production}
-      AI_BASE_URL: ${AI_BASE_URL:-}
-      AI_API_KEY: ${AI_API_KEY:-}
-      AI_MODEL: ${AI_MODEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
       BLOB_READ_WRITE_TOKEN: ${BLOB_READ_WRITE_TOKEN:-}
       # Windows bind mounts don't propagate file-change events — poll instead so edits hot-reload
       WATCHPACK_POLLING: 'true'

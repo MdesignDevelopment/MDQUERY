@@ -24,9 +24,8 @@ services:
     environment:
       DATABASE_URL: postgres://mdquery:${POSTGRES_PASSWORD:-mdquery}@db:5432/mdquery
       SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
-      AI_BASE_URL: ${AI_BASE_URL:-}
-      AI_API_KEY: ${AI_API_KEY:-}
-      AI_MODEL: ${AI_MODEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
       BLOB_READ_WRITE_TOKEN: ${BLOB_READ_WRITE_TOKEN:-}
     ports:
       # Override with WEB_PORT in .env if 3000 is already taken on the host

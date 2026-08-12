@@ -30,7 +30,7 @@ The app runs on Vercel with a hosted Postgres database (Neon) instead of the Doc
 3. **Environment variables** (Project Settings → Environment Variables):
    - `DATABASE_URL` — the Neon direct connection string above
    - `SESSION_SECRET` — a long random string (the app refuses to boot in production without one — see [auth.ts](src/lib/auth.ts))
-   - `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` — optional; omit for offline-fallback mode
+   - `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` — optional; omit for offline-fallback mode
    - `BLOB_READ_WRITE_TOKEN` — optional, for Documentation-tab image uploads; connect a Blob store under Storage → Blob and Vercel injects this automatically
 4. **Deploy.** Sessions are HTTPS-only cookies in production automatically; the connection pool sizes itself down for serverless concurrency automatically (both are environment-detected, no config needed).
 
@@ -68,7 +68,7 @@ The Docker Compose files (`docker-compose.yml` / `docker-compose.prod.yml`) rema
 | --- | --- |
 | `DATABASE_URL` | Platform metadata store (the **only** database this app talks to) |
 | `SESSION_SECRET` | HMAC key for session cookies |
-| `AI_BASE_URL` / `AI_API_KEY` / `AI_MODEL` | Optional OpenAI-compatible endpoint for the copilot (Groq/Together/Ollama serving an open-weight SQL-capable model). Unset → offline fallback |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | Claude API key for the copilot; `ANTHROPIC_MODEL` optional (defaults to `claude-sonnet-5`). Unset key → offline fallback |
 | `BLOB_READ_WRITE_TOKEN` | Optional Vercel Blob store token for Documentation-tab image uploads. Unset → uploads disabled (documentation text still works) |
 
 ## Architecture notes

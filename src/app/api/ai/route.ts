@@ -1,5 +1,5 @@
 import { handler } from '@/lib/api';
-import { fallbackResponse, providerConfigured, streamChat, type AiMode } from '@/lib/ai';
+import { currentModel, fallbackResponse, providerConfigured, streamChat, type AiMode } from '@/lib/ai';
 import { HttpError } from '@/lib/store';
 
 /**
@@ -25,7 +25,7 @@ export const POST = handler(async (req) => {
   try {
     const stream = await streamChat(mode as AiMode, text, String(instruction ?? ''));
     return new Response(stream, {
-      headers: { 'content-type': 'text/plain; charset=utf-8', 'x-ai-source': 'provider' },
+      headers: { 'content-type': 'text/plain; charset=utf-8', 'x-ai-source': 'provider', 'x-ai-model': currentModel() },
     });
   } catch (e) {
     return new Response(`AI provider error: ${(e as Error).message}\n\nFalling back to static analysis:\n\n${fallbackResponse(mode as AiMode, text, String(instruction ?? ''))}`, {

@@ -4,12 +4,25 @@ import { useRef, useState } from 'react';
 import DiffView from './DiffView';
 import { useDialogs } from './Dialogs';
 
+type AiSource = 'provider' | 'fallback' | 'fallback-error';
+
 interface Turn {
   role: 'user' | 'assistant';
   text: string;
   proposedSql?: string | null;
   applied?: boolean;
   slow?: boolean;
+  source?: AiSource;
+  model?: string;
+}
+
+/** Small badge so it's never a guess which engine answered this turn. */
+function SourceBadge({ source, model }: { source?: AiSource; model?: string }) {
+  if (!source) return null;
+  const label =
+    source === 'provider' ? `Claude · ${model}` : source === 'fallback-error' ? 'Offline · provider error' : 'Offline · static analyzer';
+  const color = source === 'provider' ? 'text-accent' : source === 'fallback-error' ? 'text-red-400' : 'text-ink-faint';
+  return <div className={`mb-1 text-[9px] uppercase tracking-wide ${color}`}>{label}</div>;
 }
 
 /**
@@ -53,6 +66,8 @@ export default function AiSidebar({ body, onApply, editable }: {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ mode, body: snapshot, instruction }),
       });
+      const source = (res.headers.get('x-ai-source') as AiSource | null) ?? undefined;
+      const model = res.headers.get('x-ai-model') ?? undefined;
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
       let acc = '';
@@ -63,7 +78,7 @@ export default function AiSidebar({ body, onApply, editable }: {
           acc += decoder.decode(value, { stream: true });
           setTurns((t) => {
             const copy = [...t];
-            copy[copy.length - 1] = { role: 'assistant', text: acc };
+            copy[copy.length - 1] = { role: 'assistant', text: acc, source, model };
             return copy;
           });
         }
@@ -71,7 +86,7 @@ export default function AiSidebar({ body, onApply, editable }: {
       const sql = mode === 'edit' ? extractSql(acc) : null;
       setTurns((t) => {
         const copy = [...t];
-        copy[copy.length - 1] = { role: 'assistant', text: acc, proposedSql: sql };
+        copy[copy.length - 1] = { role: 'assistant', text: acc, proposedSql: sql, source, model };
         return copy;
       });
     } catch (e) {
@@ -134,6 +149,7 @@ export default function AiSidebar({ body, onApply, editable }: {
               <div className="rounded-sm bg-panel-2 px-2 py-1.5 text-[11px]">{t.text}</div>
             ) : (
               <div className="text-[11px] leading-relaxed text-ink-dim">
+                <SourceBadge source={t.source} model={t.model} />
                 {t.slow && !t.text && <div className="mb-1 animate-pulse text-ink-faint">still thinking…</div>}
                 <Rendered text={t.text} hideSqlBlock={!!t.proposedSql} />
                 {t.proposedSql != null && (
