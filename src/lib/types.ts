@@ -12,7 +12,7 @@ export interface User {
 
 export interface QueryParamDef {
   name: string;
-  data_type: string; // text | number | date | enum
+  data_type: string; // text | number | date | enum | geometry
   default_value: string | null;
   enum_options: string[] | null;
   label: string | null;

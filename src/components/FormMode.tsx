@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { QueryParamDef } from '@/lib/types';
 import { resolveBinds } from '@/lib/params';
 
@@ -17,11 +17,99 @@ const VARIABLE_TYPES = [
   { value: 'enum', label: 'Enum (fixed choices)', data_type: 'enum', is_list: false },
   { value: 'list_text', label: 'List of text', data_type: 'text', is_list: true },
   { value: 'list_number', label: 'List of numbers', data_type: 'number', is_list: true },
+  { value: 'geometry', label: 'Geometry (shapefile)', data_type: 'geometry', is_list: false },
 ] as const;
 
 function variableTypeKey(p: Pick<QueryParamDef, 'data_type' | 'is_list'>): string {
   if (p.is_list) return p.data_type === 'number' ? 'list_number' : 'list_text';
   return p.data_type;
+}
+
+type ParsedFeature = { index: number; label: string; wkt: string };
+
+/**
+ * Automates the manual QGIS workflow (import shapefile -> run
+ * geom_to_wkt($geometry) -> paste into the value cell): upload a .zip
+ * shapefile bundle (or a bare .shp) and it's parsed server-side into WKT.
+ * The value stays a plain editable textarea so manual paste still works.
+ */
+function GeometryField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [error, setError] = useState('');
+  const [features, setFeatures] = useState<ParsedFeature[] | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function handleFile(file: File) {
+    setStatus('loading');
+    setError('');
+    setFeatures(null);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch('/api/geometry/parse', { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to parse shapefile.');
+      const parsed: ParsedFeature[] = data.features;
+      if (parsed.length === 1) {
+        onChange(parsed[0].wkt);
+      } else {
+        setFeatures(parsed);
+      }
+      setStatus('idle');
+    } catch (e) {
+      setStatus('error');
+      setError(e instanceof Error ? e.message : 'Failed to parse shapefile.');
+    }
+  }
+
+  return (
+    <div className="space-y-1">
+      <textarea
+        className="input mono h-16 resize-none text-[11px]"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="WKT geometry, e.g. MultiPolygon (((x y, x y, ...)))"
+      />
+      <div className="flex items-center gap-2">
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".zip,.shp"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) handleFile(f);
+            e.target.value = '';
+          }}
+        />
+        <button
+          type="button"
+          className="btn text-[10px]"
+          onClick={() => inputRef.current?.click()}
+          disabled={status === 'loading'}
+        >
+          {status === 'loading' ? 'Parsing…' : 'Upload shapefile…'}
+        </button>
+        {features && features.length > 1 && (
+          <select
+            className="input mono flex-1 text-[10px]"
+            defaultValue=""
+            onChange={(e) => {
+              const f = features[Number(e.target.value)];
+              if (f) onChange(f.wkt);
+            }}
+          >
+            <option value="" disabled>{features.length} features found — pick one</option>
+            {features.map((f, i) => <option key={f.index} value={i}>{f.label}</option>)}
+          </select>
+        )}
+      </div>
+      {status === 'error' && <span className="block text-[10px] text-red-400">{error}</span>}
+      <span className="block text-[10px] text-ink-faint">
+        Upload a .zip (.shp/.dbf/...) or a bare .shp — geometry is extracted as WKT, coordinates unprojected/as-is.
+      </span>
+    </div>
+  );
 }
 
 export default function FormMode({ body, params, values, onValues, onCopyResolved, onVariableTypeChange }: {
@@ -95,6 +183,8 @@ export default function FormMode({ body, params, values, onValues, onCopyResolve
                 <option value="">— pick —</option>
                 {p.enum_options.map((o) => <option key={o}>{o}</option>)}
               </select>
+            ) : p.data_type === 'geometry' ? (
+              <GeometryField value={values[p.name] ?? p.default_value ?? ''} onChange={(v) => set(p.name, v)} />
             ) : (
               <input
                 className="input mono"
