@@ -91,6 +91,26 @@ body {
   .doc-content ol {
     @apply mb-2 list-decimal pl-5;
   }
+  .doc-content pre {
+    @apply mb-2 overflow-auto rounded bg-panel p-2 text-[12px];
+    white-space: pre-wrap;
+  }
+  .doc-content code {
+    @apply rounded bg-panel px-1 py-0.5 text-[12px];
+  }
+  .doc-content pre code {
+    @apply bg-transparent p-0;
+  }
+  .doc-content table {
+    @apply mb-2 border-collapse;
+  }
+  .doc-content td,
+  .doc-content th {
+    @apply border border-edge px-2 py-1 align-top;
+  }
+  .doc-content th {
+    @apply font-semibold;
+  }
 }
 
 .doc-content img {
