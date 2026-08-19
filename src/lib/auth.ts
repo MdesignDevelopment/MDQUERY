@@ -1,12 +1,16 @@
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
+import { createHash, createHmac, randomBytes } from 'crypto';
 import { cookies } from 'next/headers';
 import { query } from './db';
 import type { User } from './types';
 
 /**
- * Dev/session auth: signed cookie carrying the user id.
- * Production swap: SSO against the M.Design identity provider (OIDC via
- * NextAuth.js or Supabase Auth); role claims map onto users.role.
+ * Session auth: the mdq_session cookie carries an opaque random token; the
+ * server holds a hash of it in the `sessions` table. Identity is established
+ * exclusively via "Sign in with MD Portal" (src/app/api/auth/mdportal/*) —
+ * this app never stores or checks a password of its own. Storing a hash of
+ * the token (never the token itself) means logout can revoke the session
+ * with a single UPDATE, which isn't possible at all with a plain
+ * signed-value cookie short of rotating the app-wide secret.
  */
 
 // In production (Vercel, or the Docker prod compose) a real secret is required —
@@ -16,69 +20,69 @@ if (!process.env.SESSION_SECRET && process.env.NODE_ENV === 'production') {
 }
 const SECRET = process.env.SESSION_SECRET ?? 'dev-secret';
 const COOKIE = 'mdq_session';
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-function sign(value: string): string {
+// Exported for reuse by the MD Portal SSO transaction cookie (see
+// src/app/api/auth/mdportal/*), which needs a "signed opaque value"
+// primitive for a different payload than the session token.
+export function sign(value: string): string {
   return createHmac('sha256', SECRET).update(value).digest('hex');
 }
 
-export function makeSessionValue(userId: number): string {
-  const payload = String(userId);
-  return `${payload}.${sign(payload)}`;
+function hashToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
 }
 
-export function parseSessionValue(raw: string | undefined): number | null {
-  if (!raw) return null;
-  const dot = raw.lastIndexOf('.');
-  if (dot === -1) return null;
-  const payload = raw.slice(0, dot);
-  const sig = raw.slice(dot + 1);
-  const expected = sign(payload);
-  if (sig.length !== expected.length) return null;
-  if (!timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
-  const id = Number(payload);
-  return Number.isInteger(id) ? id : null;
+/** Create a new session for a user; returns the raw token to put in the cookie. */
+export async function createSession(userId: number): Promise<string> {
+  const token = randomBytes(32).toString('base64url');
+  await query(
+    'INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ($1, $2, $3)',
+    [hashToken(token), userId, new Date(Date.now() + SESSION_TTL_MS)],
+  );
+  return token;
+}
+
+/** Revoke the session behind a raw cookie token (logout). No-op if already gone. */
+export async function revokeSession(token: string | undefined): Promise<void> {
+  if (!token) return;
+  await query('UPDATE sessions SET revoked_at = now() WHERE token_hash = $1', [hashToken(token)]);
 }
 
 export const SESSION_COOKIE = COOKIE;
 
-/** scrypt password hashing — no external deps; format "salt:hash" (hex). */
-export function hashPassword(password: string): string {
-  const salt = randomBytes(16).toString('hex');
-  const hash = scryptSync(password, salt, 64).toString('hex');
-  return `${salt}:${hash}`;
-}
-
-export function verifyPassword(password: string, stored: string | null): boolean {
-  if (!stored) return false;
-  const [salt, hash] = stored.split(':');
-  if (!salt || !hash) return false;
-  const test = scryptSync(password, salt, 64);
-  const expected = Buffer.from(hash, 'hex');
-  return expected.length === test.length && timingSafeEqual(expected, test);
-}
-
 // Session micro-cache: every API call authenticates, so avoid re-reading the
-// user row on each one. 15s TTL keeps role changes/deactivation near-instant.
+// user row on each one. 15s TTL keeps role changes/deactivation/revocation
+// near-instant. Keyed by token hash (not user id) since a user can hold
+// multiple valid sessions at once.
 const USER_TTL_MS = 15_000;
-const userCache: Map<number, { u: User; at: number }> =
-  ((globalThis as any).__mdqUserCache ??= new Map());
+const sessionCache: Map<string, { u: User; at: number }> =
+  ((globalThis as any).__mdqSessionCache ??= new Map());
 
 export async function currentUser(): Promise<User | null> {
   const store = await cookies();
-  const id = parseSessionValue(store.get(COOKIE)?.value);
-  if (id == null) return null;
-  const hit = userCache.get(id);
+  const token = store.get(COOKIE)?.value;
+  if (!token) return null;
+  const tokenHash = hashToken(token);
+  const hit = sessionCache.get(tokenHash);
   if (hit && Date.now() - hit.at < USER_TTL_MS) return hit.u;
-  const { rows } = await query<User>('SELECT id, email, name, role, department FROM users WHERE id = $1 AND active', [id]);
+  const { rows } = await query<User>(
+    `SELECT u.id, u.email, u.name, u.role, u.department
+     FROM sessions s JOIN users u ON u.id = s.user_id
+     WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now() AND u.active`,
+    [tokenHash],
+  );
   const u = rows[0] ?? null;
-  if (u) userCache.set(id, { u, at: Date.now() });
-  else userCache.delete(id);
+  if (u) sessionCache.set(tokenHash, { u, at: Date.now() });
+  else sessionCache.delete(tokenHash);
   return u;
 }
 
-/** Drop a user from the session cache (call after role/active/name changes). */
+/** Drop a user's cached sessions (call after role/active/name changes). */
 export function invalidateUserCache(id: number): void {
-  userCache.delete(id);
+  for (const [tokenHash, entry] of sessionCache) {
+    if (entry.u.id === id) sessionCache.delete(tokenHash);
+  }
 }
 
 export async function requireUser(): Promise<User> {

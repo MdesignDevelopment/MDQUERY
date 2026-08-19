@@ -9,7 +9,7 @@ docker compose up -d      # Postgres 16 + Next.js dev server
 # → http://localhost:3000
 ```
 
-First start installs npm dependencies into a named volume (takes a minute). The schema is created and seeded automatically on first request. Sign in with a seeded account (default password below); accounts are **admin-provisioned only** — there is no self-registration. SSO is the production replacement (see below).
+First start installs npm dependencies into a named volume (takes a minute). The schema is created and seeded automatically on first request. Sign in via **"Sign in with MD Portal"** — this app has no local password login (see below); accounts are either pre-provisioned by an admin or auto-created on first SSO login.
 
 **Production** (optimized build — noticeably faster than dev mode):
 
@@ -76,7 +76,7 @@ The Docker Compose files (`docker-compose.yml` / `docker-compose.prod.yml`) rema
 - **Next.js 15 App Router**, one codebase/deployment. All security-critical logic lives in Route Handlers: self-approval block, tag uniqueness, WHERE/DDL gates, AI proxy.
 - **Postgres** metadata store (schema in `src/lib/db.ts`, bootstrapped idempotently). Compose runs it alongside the app; swapping to managed Postgres/Supabase is a connection-string change.
 - **No client DB connectivity anywhere** — no pooling, no credential vaulting, no execution. Deliberate scope boundary.
-- **Auth** — email + password sign-in (scrypt hashes, HMAC-signed session cookies, deactivated accounts blocked at every request). **User management** (`/admin/users`, admin-only): create accounts, change role/department, reset passwords, deactivate/reactivate — with self-demotion and last-active-admin protection. Production: SSO via the M.Design IdP (OIDC through NextAuth.js/Supabase Auth), mapping role claims to `users.role`.
+- **Auth** — sign-in is exclusively via **MD Portal** (OIDC-lite SSO with PKCE, EdDSA-signed id_token verified against MD Portal's published JWKS; HMAC-signed session cookies, deactivated accounts blocked at every request). There is no local password login. First SSO login either links to a matching email pre-provisioned by an admin, or auto-creates a new account (`role='user'`, `department='Support'`). **User management** (`/admin/users`, admin-only): pre-provision accounts (no password field — sign-in still happens via MD Portal), change role/department, deactivate/reactivate — with self-demotion and last-active-admin protection.
 - **Parser** — the scanner/heuristics in `validation.ts` are dependency-free; production upgrade path is an ANTLR PL/SQL grammar behind the same `LintFinding` interface.
 
 ## v1 decisions on the spec's open questions (§8)
@@ -86,7 +86,7 @@ The Docker Compose files (`docker-compose.yml` / `docker-compose.prod.yml`) rema
 
 ## Seed users
 
-Default password for all seeded accounts: **`ChangeMe123!`** (admins should reset these via User Management).
+Seeded accounts have no password — sign in via **"Sign in with MD Portal"** using the matching M.Design account; first SSO login links to the row by email and keeps the role/department below.
 
 | User | Role | Department |
 | --- | --- | --- |

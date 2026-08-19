@@ -18,18 +18,21 @@ const ROLES = ['user', 'lead', 'curator', 'admin'];
 const DEPARTMENTS = ['Dev', 'Support', 'Data'];
 
 /**
- * Admin-only user management: create accounts, change roles/departments,
- * reset passwords, deactivate/reactivate. No self-registration exists —
- * this page is the only way accounts are provisioned (until SSO).
+ * Admin-only user management: pre-provision accounts, change roles/
+ * departments, deactivate/reactivate. Accounts have no password — a
+ * pre-provisioned person signs in for the first time via "Sign in with MD
+ * Portal", which links to the row created here by matching email. Anyone
+ * with an M.Design account can also sign in unprompted and get a fresh
+ * account this way (role 'user', department 'Support') if none exists yet.
  */
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
-  const [draft, setDraft] = useState({ name: '', email: '', role: 'user', department: 'Support', password: '' });
+  const [draft, setDraft] = useState({ name: '', email: '', role: 'user', department: 'Support' });
   const [forbidden, setForbidden] = useState(false);
-  const { confirm, promptText, dialogs } = useDialogs();
+  const { confirm, dialogs } = useDialogs();
 
   const load = useCallback(async () => {
     const r = await fetch('/api/admin/users');
@@ -67,21 +70,9 @@ export default function AdminUsersPage() {
     const d = await r.json();
     if (!r.ok) return flash(d.error ?? 'Failed', true);
     setCreating(false);
-    setDraft({ name: '', email: '', role: 'user', department: 'Support', password: '' });
+    setDraft({ name: '', email: '', role: 'user', department: 'Support' });
     flash(`Account created for ${d.user.name}.`);
     load();
-  }
-
-  async function resetPassword(u: AdminUser) {
-    const pw = await promptText({
-      title: `Reset password for ${u.name}`,
-      label: 'New password (min 8 characters)',
-      type: 'password',
-      minLength: 8,
-      confirmLabel: 'Reset password',
-    });
-    if (!pw) return;
-    update(u.id, { password: pw }, `Password reset for ${u.name}.`);
   }
 
   if (forbidden) {
@@ -93,7 +84,7 @@ export default function AdminUsersPage() {
       {dialogs}
       <header className="flex items-center gap-3 border-b border-edge bg-panel px-4 py-2">
         <h1 className="text-sm font-semibold">User Management</h1>
-        <span className="text-[11px] text-ink-faint">accounts are admin-provisioned — no self-registration</span>
+        <span className="text-[11px] text-ink-faint">sign-in is via MD Portal — pre-provision an account here, or let someone sign in to create one</span>
         {notice && <span className="text-[11px]" style={{ color: 'var(--risk-safe)' }}>{notice}</span>}
         {error && <span className="text-[11px]" style={{ color: 'var(--risk-high)' }} role="alert">{error}</span>}
         <span className="flex-1" />
@@ -121,10 +112,6 @@ export default function AdminUsersPage() {
             <select className="input w-28" value={draft.department} onChange={(e) => setDraft({ ...draft, department: e.target.value })}>
               {DEPARTMENTS.map((d) => <option key={d}>{d}</option>)}
             </select>
-          </label>
-          <label className="text-[11px]">
-            <span className="mb-1 block text-ink-dim">Initial password (min 8)</span>
-            <input className="input w-40" type="text" required minLength={8} value={draft.password} onChange={(e) => setDraft({ ...draft, password: e.target.value })} />
           </label>
           <button className="btn btn-primary" type="submit">Create</button>
         </form>
@@ -170,7 +157,6 @@ export default function AdminUsersPage() {
                 </td>
                 <td className="px-2 py-2">
                   <div className="flex gap-1.5">
-                    <button className="btn" onClick={() => resetPassword(u)}>Reset password</button>
                     {u.active ? (
                       <button
                         className="btn"

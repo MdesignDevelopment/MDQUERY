@@ -12,6 +12,7 @@
     "@monaco-editor/react": "^4.7.0",
     "@vercel/blob": "^2.7.0",
     "diff": "^9.0.0",
+    "jose": "^5.9.6",
     "jszip": "^3.10.1",
     "monaco-editor": "^0.52.2",
     "next": "^15.1.6",

@@ -1,6 +1,5 @@
 import { handler, json } from '@/lib/api';
 import { query } from '@/lib/db';
-import { hashPassword } from '@/lib/auth';
 import { HttpError } from '@/lib/store';
 
 const ROLES = ['user', 'lead', 'curator', 'admin'];
@@ -20,20 +19,22 @@ export const GET = handler(async (_req, user) => {
   return json({ users: rows });
 });
 
+// New accounts are pre-provisioned with no password: the person authenticates
+// exclusively via "Sign in with MD Portal" the first time they sign in, which
+// links to this row by email (see src/app/api/auth/mdportal/callback/route.ts).
 export const POST = handler(async (req, user) => {
   requireAdmin(user.role);
-  const { name, email, role, department, password } = await req.json();
+  const { name, email, role, department } = await req.json();
   if (!name?.trim() || !email?.trim()) throw new HttpError(400, 'Name and email are required.');
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())) throw new HttpError(400, 'That does not look like a valid email address.');
   if (!ROLES.includes(role)) throw new HttpError(400, 'Invalid role.');
-  if (!password || password.length < 8) throw new HttpError(400, 'Initial password must be at least 8 characters.');
   const clash = await query('SELECT id FROM users WHERE lower(email) = lower($1)', [email.trim()]);
   if (clash.rows.length > 0) throw new HttpError(409, 'A user with that email already exists.');
   const { rows } = await query(
-    `INSERT INTO users (name, email, role, department, password_hash)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO users (name, email, role, department)
+     VALUES ($1, $2, $3, $4)
      RETURNING id, email, name, role, department, active`,
-    [name.trim(), email.trim().toLowerCase(), role, department?.trim() || 'Support', hashPassword(password)],
+    [name.trim(), email.trim().toLowerCase(), role, department?.trim() || 'Support'],
   );
   return json({ user: rows[0] }, 201);
 });

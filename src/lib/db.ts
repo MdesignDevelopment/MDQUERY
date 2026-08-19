@@ -32,6 +32,27 @@ CREATE TABLE IF NOT EXISTS users (
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
+-- MD Portal's stable user id, set once a login is linked via "Sign in with MD
+-- Portal" (OIDC-lite SSO). Matched first (falls back to email only on the
+-- very first SSO login for a given account), so the link survives either
+-- side changing that account's email later.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS sso_subject TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_users_sso_subject ON users (sso_subject) WHERE sso_subject IS NOT NULL;
+
+-- Server-side session store: the mdq_session cookie carries only the raw
+-- token, never the user id. Storing a hash (not the token itself) means a
+-- database read alone can't reconstruct a working cookie. Revoking a
+-- session (logout, or an admin forcing a sign-out) is a single UPDATE here,
+-- which a stateless signed-cookie scheme can't do at all short of rotating
+-- the app-wide secret and logging everyone out.
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS ix_sessions_user ON sessions (user_id) WHERE revoked_at IS NULL;
 
 -- Categories (§2.8-style organization): private categories belong to one
 -- user, public categories are a shared taxonomy — same public/private split
@@ -353,26 +374,12 @@ async function seed(): Promise<void> {
   }
 }
 
-/** Backfill: users created before password auth get the documented default password. */
-async function backfillPasswords(): Promise<void> {
-  const p = pool();
-  const { rows } = await p.query('SELECT id FROM users WHERE password_hash IS NULL');
-  if (rows.length === 0) return;
-  const { hashPassword } = await import('./auth');
-  const hash = hashPassword(DEFAULT_PASSWORD);
-  await p.query('UPDATE users SET password_hash = $1 WHERE password_hash IS NULL', [hash]);
-}
-
-/** Default password for seeded/backfilled users — documented in the README; users should change it. */
-export const DEFAULT_PASSWORD = 'ChangeMe123!';
-
 /** Ensure schema + seed exactly once per process. */
 export function ready(): Promise<void> {
   if (!globalAny.__mdqReady) {
     globalAny.__mdqReady = (async () => {
       await pool().query(SCHEMA);
       await seed();
-      await backfillPasswords();
     })().catch((e) => {
       globalAny.__mdqReady = undefined;
       throw e;
