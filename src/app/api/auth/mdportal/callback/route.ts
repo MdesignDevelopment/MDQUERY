@@ -70,13 +70,6 @@ function clearTxnCookie(res: NextResponse) {
 
 export async function GET(req: NextRequest) {
   const issuer = process.env.MD_PORTAL_ISSUER;
-  // Where to actually send the token/JWKS requests, if different from the
-  // public issuer identity — e.g. a container-network address in local dev,
-  // or an internal load balancer in some deployments. Verification below
-  // still checks claims against `issuer`, never against this address, so
-  // this can never weaken what a valid token is allowed to say. Defaults to
-  // `issuer` itself, which is correct for a normal single-URL deployment.
-  const internalUrl = process.env.MD_PORTAL_INTERNAL_URL || issuer;
   const clientId = process.env.MD_PORTAL_CLIENT_ID;
   const clientSecret = process.env.MD_PORTAL_CLIENT_SECRET;
   const baseUrl = process.env.MDQUERY_BASE_URL;
@@ -87,6 +80,13 @@ export async function GET(req: NextRequest) {
   if (!issuer || !clientId || !clientSecret || !baseUrl) {
     return NextResponse.redirect(new URL('/login?error=sso_not_configured', baseUrl ?? req.url));
   }
+  // Where to actually send the token/JWKS requests, if different from the
+  // public issuer identity — e.g. a container-network address in local dev,
+  // or an internal load balancer in some deployments. Verification below
+  // still checks claims against `issuer`, never against this address, so
+  // this can never weaken what a valid token is allowed to say. Defaults to
+  // `issuer` itself, which is correct for a normal single-URL deployment.
+  const internalUrl = process.env.MD_PORTAL_INTERNAL_URL || issuer;
 
   const { searchParams } = req.nextUrl;
 
